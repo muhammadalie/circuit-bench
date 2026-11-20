@@ -87,6 +87,18 @@ header .grow { flex: 1; }
 #wires .pin { fill: transparent; stroke: transparent; pointer-events: all; cursor: crosshair; }
 #wires .pin:hover, .wiring #wires .pin { stroke: #1f9e3a; stroke-width: 1.5; fill: #1f9e3a33; }
 #wires .pin:hover { fill: #1f9e3a88; }
+#wires .w.real { stroke-width: 3.6; }
+#wires .wo.real { stroke: #000a; stroke-width: 5.4; }
+#wires .wshine { fill: none; stroke: #fff; stroke-opacity: .32; stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; transform: translate(-.5px, -.9px); pointer-events: none; }
+#wires .jend { stroke: #2b2b2b; stroke-width: 4.8; stroke-linecap: butt; pointer-events: none; }
+#wires .jtip { fill: #c9c9c9; stroke: #555; stroke-width: .5; pointer-events: none; }
+#wires .strip { fill: #2da44e1f; stroke: #e3a008; stroke-width: 1.2; stroke-dasharray: 3 2; pointer-events: none; }
+#wires .strip.main { fill: #2da44e2e; stroke: #1f9e3a; stroke-width: 1.6; stroke-dasharray: none; }
+#wires .sh { fill: #e3a008; pointer-events: none; }
+#wires .sh.main { fill: #1f9e3a; }
+#wires .pin.in { stroke: #2da44e; stroke-width: 1; fill: none; }
+#wires .pin.hl { stroke: #1f9e3a; stroke-width: 2; fill: #1f9e3a55; }
+.part.bb { z-index: 0; }
 #wires .draft { fill: none; stroke: #1f9e3a; stroke-width: 3; stroke-dasharray: 5 4; }
 .zoom { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 4px; }
 .zoom button { width: 34px; height: 34px; padding: 0; background: var(--panel); }
@@ -212,7 +224,7 @@ table.projects { width: 100%; } table.projects td { padding: 6px 4px; border-bot
   .hint { display: none; }
   #legend { display: none; }
   #guidebar { bottom: 50px; }
-  #speed, #flowSel { max-width: 120px; }
+  #speed, #flowSel, #wireLook { max-width: 120px; }
   .grp-btn button { padding: 5px 8px; }
 }
 </style>
@@ -236,6 +248,10 @@ table.projects { width: 100%; } table.projects td { padding: 6px 4px; border-bot
       <option value="electrons" selected>Flow: electrons</option>
       <option value="current">Flow: current</option>
       <option value="off">Flow: off</option>
+    </select>
+    <select id="wireLook" aria-label="Wire look" title="How wires are drawn">
+      <option value="real" selected>Wires: realistic</option>
+      <option value="flat">Wires: simple</option>
     </select>
     <span class="grow"></span>
     <div class="menu"><button id="exBtn">Examples ▾</button><div id="exMenu" hidden></div></div>
@@ -7526,12 +7542,188 @@ function startFirmware(c, P, pinOfGpio) {
 
 return { boardParts };
 })();
+__m['breadboard'] = (() => {
+// Solderless breadboards drawn like the real thing: holes 0.1" (9.6 px) apart,
+// the same pitch as the Wokwi part drawings, so legs drop straight into holes.
+//
+// Hole names follow Wokwi's breadboard, so diagram.json files move across:
+//   main area  "<column><t|b>.<row>"  e.g. 12t.c (top half, rows a–e) or 12b.h (bottom half, rows f–j)
+//   power rails  tp.N / tn.N (top + / −) and bp.N / bn.N (bottom + / −), N counted from the left.
+// Inside the board each column's five holes a–e share one metal clip, f–j
+// another, and each rail is one long clip (or two halves on "split rail" boards).
+
+const BB_PITCH = 9.6;
+const P = BB_PITCH;
+const ROWS_T = ['a', 'b', 'c', 'd', 'e'];
+const ROWS_B = ['f', 'g', 'h', 'i', 'j'];
+
+const SIZES = {
+  full: { cols: 63, rail: 50, railStart: 2, label: 'Full size (830 holes)' },
+  half: { cols: 30, rail: 25, railStart: 1, label: 'Half size (400 holes)' },
+};
+
+const cache = new Map();
+// Everything about one board's layout: hole positions, strips, size.
+function bbGeometry(size = 'full', split = false) {
+  const key = `${size}|${split}`;
+  if (cache.has(key)) return cache.get(key);
+  const s = SIZES[size] || SIZES.full;
+  const x0 = 22;
+  const w = x0 * 2 + (s.cols - 1) * P;
+  // Row y positions, top to bottom.
+  const y = {
+    tn: 14, tp: 14 + P,
+    a: 54, f: 54 + 7 * P,
+    bp: 54 + 11 * P + 26, bn: 54 + 12 * P + 26,
+  };
+  ROWS_T.forEach((r, k) => { y[r] = y.a + k * P; });
+  ROWS_B.forEach((r, k) => { y[r] = y.f + k * P; });
+  const h = y.bn + 14;
+  const holes = {};         // name -> [x, y]
+  const grid = new Map();   // `${rowKey}|${col}` -> name (col counted from 0)
+  const groups = [];        // strips of holes joined inside the board
+  const groupOf = {};       // name -> index into groups
+  const add = (name, rowKey, c, g) => {
+    holes[name] = [x0 + c * P, y[rowKey]];
+    grid.set(`${rowKey}|${c}`, name);
+    groupOf[name] = g;
+    groups[g].names.push(name);
+  };
+  for (let c = 0; c < s.cols; c++) {
+    let g = groups.push({ kind: 'strip', half: 't', col: c + 1, names: [] }) - 1;
+    for (const r of ROWS_T) add(`${c + 1}t.${r}`, r, c, g);
+    g = groups.push({ kind: 'strip', half: 'b', col: c + 1, names: [] }) - 1;
+    for (const r of ROWS_B) add(`${c + 1}b.${r}`, r, c, g);
+  }
+  const railCol = (n) => s.railStart + Math.floor((n - 1) / 5) * 6 + ((n - 1) % 5);
+  for (const rk of ['tn', 'tp', 'bp', 'bn']) {
+    const parts = split ? 2 : 1;
+    const base = groups.length;
+    for (let k = 0; k < parts; k++) groups.push({ kind: 'rail', rail: rk, part: parts > 1 ? k : -1, names: [] });
+    for (let n = 1; n <= s.rail; n++) add(`${rk}.${n}`, rk, railCol(n), base + (split && n > s.rail / 2 ? 1 : 0));
+  }
+  const rowKeys = Object.keys(y);
+  const geo = { size, split, cols: s.cols, rail: s.rail, x0, w, h, y, holes, groups, groupOf, grid, rowKeys, label: s.label };
+  cache.set(key, geo);
+  return geo;
+}
+
+// The hole under a point in the board's own (unrotated) coordinates, or null.
+function holeAt(geo, lx, ly, tol = P / 2) {
+  const c = Math.round((lx - geo.x0) / P);
+  if (Math.abs(geo.x0 + c * P - lx) > tol) return null;
+  for (const rk of geo.rowKeys) {
+    if (Math.abs(geo.y[rk] - ly) > tol) continue;
+    const name = geo.grid.get(`${rk}|${c}`);
+    if (name) return name;
+  }
+  return null;
+}
+
+const RAIL_WORD = { tn: 'top − (blue) rail', tp: 'top + (red) rail', bp: 'bottom + (red) rail', bn: 'bottom − (blue) rail' };
+// Plain words for a hole, for tooltips and guide steps.
+function holeLabel(name) {
+  const m = /^(\d+)([tb])\.([a-j])$/.exec(name);
+  if (m) return `hole ${m[1]}${m[3]}`;
+  const r = /^(t[pn]|b[pn])\.(\d+)$/.exec(name);
+  if (r) return `${RAIL_WORD[r[1]]}, hole ${r[2]}`;
+  return name;
+}
+// What the strip a hole sits on joins, in words.
+function stripText(geo, name) {
+  const g = geo.groups[geo.groupOf[name]];
+  if (!g) return '';
+  if (g.kind === 'strip') {
+    const rows = g.half === 't' ? 'a–e' : 'f–j';
+    return `Holes ${g.col}${rows[0]}–${g.col}${rows[2]} are one metal strip inside the board. The gap in the middle splits ${g.col}a–e from ${g.col}f–j.`;
+  }
+  const where = g.part < 0 ? 'the whole length of the board' : g.part === 0 ? 'the left half of the board (split rail)' : 'the right half of the board (split rail)';
+  return `The ${RAIL_WORD[g.rail]} is one strip along ${where}: every hole on it is connected.`;
+}
+
+// Box around a strip (in board coordinates), for the hover highlight.
+function stripBox(geo, g) {
+  const pts = g.names.map((n) => geo.holes[n]);
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const pad = 4.6;
+  return [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad];
+}
+
+// SVG of the board: white plastic, dark square holes, row letters, column
+// numbers and red / blue rail lines, like the boards sold as MB-102.
+function bbSvg(geo) {
+  const { w, h, y, x0, cols } = geo;
+  const hole = ([x, yy]) => `<rect x="${(x - 1.9).toFixed(2)}" y="${(yy - 1.9).toFixed(2)}" width="3.8" height="3.8" rx=".6"/>`;
+  const holes = Object.values(geo.holes).map(hole).join('');
+  const xr = x0 + (cols - 1) * P;
+  let labels = '';
+  for (const r of [...ROWS_T, ...ROWS_B]) {
+    labels += `<text x="${x0 - 12}" y="${y[r] + 2.6}">${r}</text><text x="${xr + 12}" y="${y[r] + 2.6}">${r}</text>`;
+  }
+  for (let c = 1; c <= cols; c++) {
+    if (c !== 1 && c % 5) continue;
+    const x = x0 + (c - 1) * P;
+    labels += `<text x="${x}" y="${y.a - 8}">${c}</text><text x="${x}" y="${y.j + 13}">${c}</text>`;
+  }
+  // Rail lines: red next to +, blue next to −. On split rails the line breaks.
+  const railLine = (yy, color) => {
+    if (!geo.split) return `<path d="M${x0 - 6} ${yy}H${xr + 6}" stroke="${color}" stroke-width="1.6"/>`;
+    const mid = x0 + (cols - 1) * P / 2;
+    return `<path d="M${x0 - 6} ${yy}H${mid - 8}M${mid + 8} ${yy}H${xr + 6}" stroke="${color}" stroke-width="1.6"/>`;
+  };
+  const rails = railLine(y.tn - 7, '#2463d6') + railLine(y.tp + 7, '#d1242f') + railLine(y.bp - 7, '#d1242f') + railLine(y.bn + 7, '#2463d6');
+  const signs = [['tn', '−', '#2463d6'], ['tp', '+', '#d1242f'], ['bp', '+', '#d1242f'], ['bn', '−', '#2463d6']]
+    .map(([k, s, c]) => `<text x="${x0 - 12}" y="${y[k] + 3.2}" fill="${c}" font-size="9" font-weight="700">${s}</text><text x="${xr + 12}" y="${y[k] + 3.2}" fill="${c}" font-size="9" font-weight="700">${s}</text>`).join('');
+  const gapY = (y.e + y.f) / 2;
+  return `
+    <rect x=".5" y=".5" width="${w - 1}" height="${h - 1}" rx="5" fill="#f4f3ee" stroke="#c9c6bb"/>
+    <rect x="3" y="${y.tp + 13}" width="${w - 6}" height="${y.bp - y.tp - 26}" rx="3" fill="#f9f8f4" stroke="#e4e1d6"/>
+    <rect x="3" y="${gapY - 4}" width="${w - 6}" height="8" fill="#dedbd0"/>
+    <path d="M3 ${gapY}H${w - 3}" stroke="#cbc7ba" stroke-width="1"/>
+    ${rails}
+    <g fill="#3b3b3b">${holes}</g>
+    <g fill="#8a877c" font-size="6.2" text-anchor="middle" font-family="system-ui,sans-serif">${labels}</g>
+    <g text-anchor="middle" font-family="system-ui,sans-serif">${signs}</g>`;
+}
+
+// Library entries: no electrical model, only the strips (internal links).
+// For the simulation the app passes props.__used (the holes something touches)
+// so the solver does not carry hundreds of empty nets.
+function breadboardDef(size, name) {
+  return {
+    cat: 'Boards', name, breadboard: true, bbSize: size,
+    pins: (p) => p.__used || Object.keys(bbGeometry(size, p.rails === 'split').holes),
+    internal: (p) => {
+      const geo = bbGeometry(size, p.rails === 'split');
+      const used = p.__used ? new Set(p.__used) : null;
+      return geo.groups.map((g) => (used ? g.names.filter((n) => used.has(n)) : g.names)).filter((g) => g.length > 1);
+    },
+    props: { rails: { label: 'Power rails', type: 'select', options: [['full', 'One strip end to end'], ['split', 'Split in the middle']], default: 'full' } },
+    drawing: (p) => {
+      const geo = bbGeometry(size, p.rails === 'split');
+      return { w: geo.w, h: geo.h, pins: geo.holes, svg: () => bbSvg(geo) };
+    },
+    bom: () => (size === 'half'
+      ? { label: 'Breadboard, half size (400 points)', search: 'half size breadboard 400 points', inr: [60, 120] }
+      : { label: 'Breadboard (830 points)', search: 'breadboard 830 points', inr: [80, 150] }),
+  };
+}
+
+const BREADBOARDS = {
+  'wokwi-breadboard': breadboardDef('full', 'Breadboard (830 holes)'),
+  'wokwi-breadboard-half': breadboardDef('half', 'Breadboard, half (400 holes)'),
+};
+
+return { BB_PITCH, bbGeometry, holeAt, holeLabel, stripText, stripBox, bbSvg, BREADBOARDS };
+})();
 __m['library'] = (() => {
 // Part library for Circuit Bench. Each part: pins, editable props, a BOM
 // line, and an electrical model (stamps into the nodal solver), plus rating
 // checks and live readings. Part names match Wokwi where Wokwi has the part,
 // so diagrams can move between the two tools.
 const { boardParts } = __m['boards'];
+const { BREADBOARDS } = __m['breadboard'];
 
 const fmtV = (v) => (Number.isFinite(v) ? `${v.toFixed(2)} V` : 'floating');
 const fmtA = (a) => (Math.abs(a) < 0.1 ? `${(a * 1000).toFixed(1)} mA` : `${a.toFixed(2)} A`);
@@ -7622,6 +7814,7 @@ function interp(t, x) {
 // ---------- the library ----------
 const LIB = {
   ...boardParts(),
+  ...BREADBOARDS,
 
   'bench-battery-2s18650': battery({
     name: '2 × 18650 Li-ion (7.4 V)', draw: 'battery', cells: 2, rint: 0.2, capacityAh: 2.5, maxA: 10, cutoff: 3.3,
@@ -8765,6 +8958,7 @@ function genericDrawing(def, props) {
 }
 
 function drawingFor(def, props) {
+  if (def.drawing) return def.drawing(props);
   const f = def.draw && DRAW[def.draw];
   return f ? f(props, def) : genericDrawing(def, props);
 }
@@ -8980,6 +9174,126 @@ const EXAMPLES = [
   RC_CAR,
 ];
 
+// ---------- the same examples built on a breadboard ----------
+// Parts are placed by naming the hole one leg goes into (`plug`); the app
+// works out the exact position once the drawing is measured. The board sits
+// beside the breadboard (like an ESP32 on its expansion shield) and jumper
+// wires run from its pins to the holes. `$KEY` names a board pin from `pins`.
+const railN = (col) => { let k = col - 3; if (k % 6 === 5) k++; return Math.floor(k / 6) * 5 + (k % 6) + 1; };
+// Series resistor on row e from column col−6 to col, LED legs in row a
+// (long leg A in col, short leg C in col−1), C jumped to the top − rail.
+const ledStage = (n, col, color, sig, wire = 'green', ohms = 220) => ({
+  parts: [[`r${n}`, 'wokwi-resistor', { value: ohms }, { 1: `${col - 6}t.e` }], [`led${n}`, 'wokwi-led', color === 'red' ? {} : { color }, { A: `${col}t.a` }]],
+  wires: [[sig, `${col - 6}t.a`, wire], [`${col - 1}t.b`, `tn.${railN(col + 3)}`, 'black']],
+});
+const join = (...xs) => ({ parts: xs.flatMap((x) => x.parts || []), wires: xs.flatMap((x) => x.wires || []) });
+const power = (v = '$V', gnd = '$GND') => ({ wires: [...(v ? [[v, 'tp.1', 'red']] : []), [gnd, 'tn.1', 'black']] });
+
+const BB = {
+  'led-battery': {
+    tip: 'On the breadboard: the battery feeds the + and − rails. A red jumper takes + to column 21, where the LED\'s long leg (A) sits; its short leg (C) is in column 20 with the resistor\'s right leg; the resistor\'s left leg (column 14) goes back to the − rail.',
+    any: {
+      parts: [['bat1', 'bench-battery-9v', {}, null, 0, [-130, 70]], ['led1', 'wokwi-led', {}, { A: '21t.a' }], ['r1', 'wokwi-resistor', { value: 470 }, { 2: '20t.e' }]],
+      wires: [['bat1.+', 'tp.1', 'red'], ['bat1.-', 'tn.1', 'black'], [`tp.${railN(23)}`, '21t.c', 'red'], ['14t.b', `tn.${railN(13)}`, 'black']],
+    },
+  },
+  'led-no-resistor': {
+    tip: 'On the breadboard: + goes from the rail to column 21 (long leg A), and column 20 (short leg C) goes straight back to the − rail: nothing limits the current.',
+    any: {
+      parts: [['bat1', 'bench-battery-9v', {}, null, 0, [-130, 70]], ['led1', 'wokwi-led', {}, { A: '21t.a' }]],
+      wires: [['bat1.+', 'tp.1', 'red'], ['bat1.-', 'tn.1', 'black'], [`tp.${railN(23)}`, '21t.c', 'red'], ['20t.c', `tn.${railN(16)}`, 'black']],
+    },
+  },
+  blink: {
+    tip: 'On the breadboard: the green wire brings the pin to column 15, the resistor joins column 15 to column 21, the LED\'s long leg (A) is in column 21 and its short leg (C) in column 20, which a black jumper takes to the − rail. The board\'s GND feeds that rail.',
+    pins: { esp32: { SIG: 'D2', GND: 'GND.1' }, uno: { SIG: '13', GND: 'GND.2' } },
+    any: join(power(null), ledStage(1, 21, 'red', '$SIG')),
+  },
+  'button-led': {
+    tip: 'On the breadboard: the button sits across the middle gap (columns 28 and 30). Pressing it joins column 30, wired to the input pin, to column 28, wired to the − rail.',
+    pins: { esp32: { BTN: 'D4', LED: 'D2', GND: 'GND.1' }, uno: { BTN: '2', LED: '13', GND: 'GND.2' } },
+    any: join(power(null), ledStage(1, 21, 'red', '$LED'), {
+      parts: [['btn1', 'wokwi-pushbutton', {}, { '1.l': '30t.c' }, 90]],
+      wires: [['$BTN', '30t.a', 'blue'], ['28t.a', `tn.${railN(27)}`, 'black']],
+    }),
+  },
+  'pot-dimmer': {
+    tip: 'On the breadboard: the pot\'s three legs are in columns 40 (GND), 41 (signal) and 42 (VCC). Jumpers take 40 to the − rail and 42 to the + rail; the board feeds the rails.',
+    pins: { esp32: { V: '3V3', SIG: 'D34', LED: 'D25', GND: 'GND.1' }, uno: { V: '5V', SIG: 'A0', LED: '9', GND: 'GND.2' } },
+    any: join(power(), ledStage(1, 21, 'green', '$LED'), {
+      parts: [['pot1', 'wokwi-potentiometer', {}, { GND: '40t.a' }]],
+      wires: [['40t.c', `tn.${railN(35)}`, 'black'], ['42t.c', `tp.${railN(47)}`, 'red'], ['41t.c', '$SIG', 'orange']],
+    }),
+  },
+  'traffic-light': {
+    tip: 'On the breadboard: three copies of the same LED stage (pin → resistor → LED → − rail) in columns 15–21, 25–31 and 35–41. All three short legs share the − rail.',
+    pins: { esp32: { R: 'D25', Y: 'D26', G: 'D27', GND: 'GND.1' }, uno: { R: '12', Y: '11', G: '10', GND: 'GND.2' } },
+    any: join(power(null), ledStage(1, 21, 'red', '$R', 'red'), ledStage(2, 31, 'yellow', '$Y', 'orange'), ledStage(3, 41, 'green', '$G', 'green')),
+  },
+  'distance-alarm': {
+    tip: 'On the breadboard: the sensor\'s legs are in columns 48 (VCC), 49 (TRIG), 50 (ECHO) and 51 (GND). VCC goes to the + rail, GND to the − rail.',
+    pins: { esp32: { V: 'VIN', TRIG: 'D4', ECHO: 'D34', LED: 'D2', GND: 'GND.1' }, uno: { V: '5V', TRIG: '9', ECHO: '10', LED: '13', GND: 'GND.2' } },
+    esp32: join(power(), ledStage(1, 21, 'red', '$LED'), {
+      parts: [['us1', 'wokwi-hc-sr04', { distance: 50 }, { VCC: '48t.a' }], ['ra', 'wokwi-resistor', { value: 1000 }, { 1: '50t.e' }], ['rb', 'wokwi-resistor', { value: 2000 }, { 1: '56t.b' }]],
+      wires: [['48t.c', `tp.${railN(39)}`, 'red'], ['51t.c', `tn.${railN(60)}`, 'black'], ['49t.c', '$TRIG', 'blue'], ['56t.d', '$ECHO', 'purple'], ['62t.c', `tn.${railN(61)}`, 'black']],
+    }),
+    uno: join(power(), ledStage(1, 21, 'red', '$LED'), {
+      parts: [['us1', 'wokwi-hc-sr04', { distance: 50 }, { VCC: '48t.a' }]],
+      wires: [['48t.c', `tp.${railN(39)}`, 'red'], ['51t.c', `tn.${railN(60)}`, 'black'], ['49t.c', '$TRIG', 'blue'], ['50t.c', '$ECHO', 'purple']],
+    }),
+  },
+  'servo-sweep': {
+    tip: 'On the breadboard: the board feeds the bottom rails, the servo takes power from them, and its signal goes through column 35 (f–j) to the board pin.',
+    pins: { esp32: { V: 'VIN', SIG: 'D18', GND: 'GND.1' }, uno: { V: '5V', SIG: '9', GND: 'GND.2' } },
+    any: {
+      parts: [['sv1', 'wokwi-servo', {}, null, 0, [430, 250]]],
+      wires: [['$V', 'bp.1', 'red'], ['$GND', 'bn.1', 'black'], ['sv1.V+', `bp.${railN(43)}`, 'red'], ['sv1.GND', `bn.${railN(45)}`, 'black'], ['sv1.PWM', '35b.j', 'orange'], ['$SIG', '35b.f', 'orange']],
+    },
+  },
+  'motor-mosfet': {
+    tip: 'On the breadboard: the MOSFET\'s legs are in columns 30 (G), 31 (D) and 32 (S). The battery feeds the bottom rails, the board feeds the top rails, and one black wire joins the two − rails so both share ground.',
+    pins: { esp32: { V: '3V3', SIG: 'D34', G: 'D25', GND: 'GND.1' }, uno: { V: '5V', SIG: 'A0', G: '9', GND: 'GND.2' } },
+    any: join(power(), {
+      parts: [['pot1', 'wokwi-potentiometer', { value: 700 }, { GND: '45t.a' }], ['q1', 'bench-nmos', {}, { G: '30t.a' }],
+        ['m1', 'bench-dc-motor', {}, null, 0, [330, 250]], ['bat1', 'bench-battery-4aa', {}, null, 0, [60, 250]]],
+      wires: [['45t.c', `tn.${railN(39)}`, 'black'], ['47t.c', `tp.${railN(52)}`, 'red'], ['46t.c', '$SIG', 'orange'],
+        ['$G', '30t.c', 'green'], ['32t.c', `tn.${railN(35)}`, 'black'], ['31t.c', 'm1.-', 'black'],
+        ['bat1.+', 'bp.1', 'red'], ['bat1.-', 'bn.1', 'black'], ['m1.+', `bp.${railN(26)}`, 'red'], ['bn.50', 'tn.50', 'black']],
+    }),
+  },
+};
+const BOARD_SPOT = { esp32: ['esp', 'wokwi-esp32-devkit-v1', -165, 8], uno: ['uno', 'wokwi-arduino-uno', -330, 4] };
+
+const hasBreadboard = (id) => !!BB[id];
+// The breadboard version of an example for one board.
+function onBreadboard(id, board, base) {
+  const spec = BB[id];
+  const layout = spec[board] || spec.any;
+  const pins = spec.pins?.[board] || {};
+  const parts = [P('bb1', 'wokwi-breadboard', 0, 0)];
+  if (spec.pins) {
+    const [bid, type, x, y] = BOARD_SPOT[board];
+    const fw = base.parts.find((p) => p.type === type)?.props?.firmware;
+    parts.push(P(bid, type, x, y, fw ? { firmware: fw } : {}));
+  }
+  const bid = spec.pins ? BOARD_SPOT[board][0] : null;
+  for (const [pid, type, props, plug, rot = 0, at] of layout.parts) {
+    const part = P(pid, type, at ? at[0] : 0, at ? at[1] : 0, props, rot);
+    if (plug) part.plug = plug;
+    parts.push(part);
+  }
+  const end = (e) => {
+    if (e.startsWith('$')) return { part: bid, pin: pins[e.slice(1)] };
+    if (/^(\d+[tb]\.[a-j]|[tb][pn]\.\d+)$/.test(e)) return { part: 'bb1', pin: e };
+    const [pp] = e.split('.');
+    return { part: pp, pin: e.slice(pp.length + 1) };
+  };
+  // Wires from the board ask the app to route around it when the pin faces away.
+  const wires = layout.wires.map(([a, b, color]) => (b.startsWith('$') ? [b, a, color] : [a, b, color]))
+    .map(([a, b, color]) => ({ a: end(a), b: end(b), color, pts: [], ...(a.startsWith('$') ? { route: 'board' } : {}) }));
+  return { parts, wires, learn: `${base.learn || ''} ${spec.tip}`.trim(), layout: 'bb' };
+}
+
 // Boards an example can run on. Examples with `boards` have one layout per
 // board (the sketch picks its pins with #ifdef BOARD_UNO); the rest have one.
 const BOARD_NAMES = { esp32: 'ESP32', uno: 'Arduino Uno' };
@@ -8989,16 +9303,24 @@ const exampleBoards = (ex) => (ex?.boards ? Object.keys(ex.boards) : []);
 const boardOfExample = (ex) => ex?.board || BOARD_TYPES[ex?.parts?.find((p) => BOARD_TYPES[p.type])?.type];
 // One example ready to load: its layout for `board` (falls back to ESP32,
 // then the first board it has).
-function exampleFor(id, board) {
+// With layout 'bb' the parts sit on a breadboard (when the example has one).
+function exampleFor(id, board, layout = 'wires') {
   const ex = EXAMPLES.find((x) => x.id === id);
   if (!ex) return null;
-  if (!ex.boards) return { ...ex, board: boardOfExample(ex) };
-  const b = ex.boards[board] ? board : ex.boards.esp32 ? 'esp32' : Object.keys(ex.boards)[0];
-  const { boards, ...base } = ex;
-  return { ...base, ...ex.boards[b], board: b, name: `${ex.name} (${BOARD_NAMES[b]})` };
+  let out;
+  if (!ex.boards) out = { ...ex, board: boardOfExample(ex) };
+  else {
+    const b = ex.boards[board] ? board : ex.boards.esp32 ? 'esp32' : Object.keys(ex.boards)[0];
+    const { boards, ...base } = ex;
+    out = { ...base, ...ex.boards[b], board: b, name: `${ex.name} (${BOARD_NAMES[b]})` };
+  }
+  if (layout === 'bb' && BB[id]) {
+    out = { ...out, ...onBreadboard(id, out.board, out), name: `${out.name} on a breadboard` };
+  }
+  return out;
 }
 
-return { EXAMPLES, BOARD_NAMES, exampleBoards, boardOfExample, exampleFor };
+return { EXAMPLES, hasBreadboard, BOARD_NAMES, exampleBoards, boardOfExample, exampleFor };
 })();
 __m['info'] = (() => {
 // Plain-language details for each part: what it does, what each pin is
@@ -9006,7 +9328,17 @@ __m['info'] = (() => {
 
 const ESP32_ADC2 = ['D0', 'D2', 'D4', 'D12', 'D13', 'D14', 'D15', 'D25', 'D26', 'D27'];
 
+const { holeLabel } = __m['breadboard'];
+
 const PART_INFO = {
+  'wokwi-breadboard': {
+    about: 'A board full of holes for building circuits without solder. Under each group of five holes (a–e, or f–j, in one numbered column) is one metal clip, so legs in the same group are connected. The long rows marked + and − along the edges are the power rails.',
+    tips: ['Hover any hole to see which holes it is connected to.', 'The gap in the middle splits each column: a–e and f–j are not connected.', 'Put a wire from your board\'s GND to a − rail and from 3V3 or 5V to a + rail, then take power from the rails.', 'Some boards split the rails in the middle (the red and blue lines break): bridge the halves with a short wire.'],
+  },
+  'wokwi-breadboard-half': {
+    about: 'A half-size breadboard: 30 columns. Each group of five holes in a column is one metal clip; the + and − rails along the edges carry power.',
+    tips: ['Hover any hole to see which holes it is connected to.', 'The gap in the middle splits each column: a–e and f–j are not connected.'],
+  },
   'wokwi-esp32-devkit-v1': {
     about: 'A small computer (microcontroller) with Wi-Fi and Bluetooth. It runs your Arduino sketch and works at 3.3 V: its pins give 3.3 V and must never receive more.',
     tips: ['Power it from USB, or 5–12 V into VIN.', 'D34, D35, VP (36) and VN (39) are input-only.', 'Analog pins on ADC2 (D2, D4, D12–D15, D25–D27) stop working while Wi-Fi is on; use D32–D39 for sensors.', 'Each pin can give about 20 mA safely: always use a resistor with an LED.'],
@@ -9049,6 +9381,7 @@ const PART_INFO = {
 function pinInfo(type, pin) {
   const own = PART_INFO[type]?.pins?.[pin];
   if (own) return own;
+  if (/breadboard/.test(type || '')) return `Breadboard ${holeLabel(pin)}`;
   if (/^GND/.test(pin)) return 'Ground (0 V). All grounds in a circuit must be connected.';
   if (type === 'wokwi-esp32-devkit-v1') {
     if (pin === '3V3') return '3.3 V output from the board regulator (max ~500 mA total)';
@@ -9083,8 +9416,9 @@ __m['app'] = (() => {
 const { LIB, CATEGORIES } = __m['library'];
 const { Bench, defaults, issueKey } = __m['engine'];
 const { drawingFor } = __m['draw'];
-const { EXAMPLES, BOARD_NAMES, exampleBoards, boardOfExample, exampleFor } = __m['examples'];
+const { EXAMPLES, BOARD_NAMES, exampleBoards, boardOfExample, exampleFor, hasBreadboard } = __m['examples'];
 const { PART_INFO, pinInfo } = __m['info'];
+const { bbGeometry, holeAt, holeLabel, stripText, stripBox } = __m['breadboard'];
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -9096,8 +9430,10 @@ const store = {
 };
 // Board the examples open on (ESP32 by default); remembered in this browser.
 let exBoard = store.get('circuit-bench-board') === 'uno' ? 'uno' : 'esp32';
+let exLayout = store.get('circuit-bench-layout') === 'wires' ? 'wires' : 'bb';
 const boardPickHtml = (cur, act) => `<span class="seg" role="group" aria-label="Board">${Object.entries(BOARD_NAMES).map(([b, n]) => `<button data-act="${act}" data-board="${b}" class="${b === cur ? 'on' : ''}" aria-pressed="${b === cur}">${n}</button>`).join('')}</span>`;
 const exLabel = (ex) => exampleBoards(ex).length > 1 ? `${ex.name} (${BOARD_NAMES[exampleBoards(ex).includes(exBoard) ? exBoard : exampleBoards(ex)[0]]})` : ex.name;
+const layoutPickHtml = (cur, act) => `<span class="seg" role="group" aria-label="Layout">${[['bb', 'On a breadboard'], ['wires', 'Wires only']].map(([k, n]) => `<button data-act="${act}" data-layout="${k}" class="${k === cur ? 'on' : ''}" aria-pressed="${k === cur}">${n}</button>`).join('')}</span>`;
 const b64ToBytes = (b64) => Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
 const bytesToB64 = (bytes) => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
 
@@ -9149,12 +9485,130 @@ const PREFIX = {
   'wokwi-buzzer': 'bz', 'wokwi-servo': 'servo', 'wokwi-potentiometer': 'pot', 'wokwi-pushbutton': 'btn', 'wokwi-slide-switch': 'sw', 'wokwi-hc-sr04': 'us',
   'wokwi-pir-motion-sensor': 'pir', 'wokwi-photoresistor-sensor': 'ldr', 'wokwi-ntc-temperature-sensor': 'ntc', 'wokwi-ssd1306': 'oled', 'wokwi-lcd1602': 'lcd',
   'bench-switch': 'sw', 'bench-lm2596': 'buck', 'bench-ams1117': 'ldo', 'bench-capacitor': 'c', 'bench-dc-motor': 'm', 'bench-diode': 'd', 'bench-nmos': 'q',
-  'bench-tb6612': 'drv', 'bench-l298n': 'drv', 'bench-usb-5v': 'usb',
+  'bench-tb6612': 'drv', 'bench-l298n': 'drv', 'bench-usb-5v': 'usb', 'wokwi-breadboard': 'bb', 'wokwi-breadboard-half': 'bb',
 };
 const prefixOf = (type) => PREFIX[type] || (type.startsWith('bench-battery') ? 'bat' : type.replace(/^(wokwi|bench)-/, '').split('-')[0]);
 
 const partOf = (id) => doc.parts.find((p) => p.id === id);
 const propsOf = (p) => ({ ...defaults(LIB[p.type]), ...(p.props || {}) });
+
+// ---------- breadboards ----------
+// Legs that land on a hole (within PLUG_TOL px) are plugged in: connected
+// to that hole as if by a wire. Nothing is stored; it follows the positions.
+const isBB = (p) => !!LIB[p?.type]?.breadboard;
+const bbGeo = (p) => bbGeometry(LIB[p.type].bbSize, propsOf(p).rails === 'split');
+const PLUG_TOL = 3.5;
+function toLocal(b, xy) {
+  const geo = bbGeo(b);
+  const cx = geo.w / 2;
+  const cy = geo.h / 2;
+  const a = (-(b.rot || 0) * Math.PI) / 180;
+  const dx = xy[0] - b.x - cx;
+  const dy = xy[1] - b.y - cy;
+  return [cx + dx * Math.cos(a) - dy * Math.sin(a), cy + dx * Math.sin(a) + dy * Math.cos(a)];
+}
+function holeUnder(b, xy, tol) { return holeAt(bbGeo(b), ...toLocal(b, xy), tol); }
+function plugs() {
+  const out = [];
+  const bbs = doc.parts.filter(isBB);
+  if (!bbs.length) return out;
+  for (const p of doc.parts) {
+    if (isBB(p)) continue;
+    const v = views.get(p.id);
+    for (const pin of Object.keys(v?.pins || {})) {
+      const xy = pinXY(p.id, pin);
+      if (!xy) continue;
+      for (const b of bbs) {
+        const h = holeUnder(b, xy, PLUG_TOL);
+        if (h) { out.push({ a: { part: p.id, pin }, b: { part: b.id, pin: h } }); break; }
+      }
+    }
+  }
+  return out;
+}
+const plugKey = () => plugs().map((w) => `${w.a.part}.${w.a.pin}>${w.b.pin}`).join(',');
+const isWired = (id) => doc.wires.some((w) => w.a.part === id || w.b.part === id) || plugs().some((w) => w.a.part === id || w.b.part === id);
+// The document the simulator sees: plugged legs become extra wires after the
+// real ones (so wire indices still match), and each breadboard only carries
+// the holes something touches.
+function simDoc() {
+  const d = clone(doc);
+  d.wires.push(...plugs().map((w) => ({ ...w, plug: true, pts: [] })));
+  const used = new Map();
+  for (const w of d.wires) {
+    for (const e of [w.a, w.b]) {
+      const p = d.parts.find((q) => q.id === e.part);
+      if (p && isBB(p)) { if (!used.has(p.id)) used.set(p.id, new Set()); used.get(p.id).add(e.pin); }
+    }
+  }
+  for (const p of d.parts) if (isBB(p)) p.props = { ...p.props, __used: [...(used.get(p.id) || [])] };
+  return d;
+}
+// Nudge a part so its nearest leg drops into a hole, like pressing it into
+// the board. Returns true when it moved onto a hole.
+function seat(p) {
+  if (isBB(p)) return false;
+  const bbs = doc.parts.filter(isBB);
+  if (!bbs.length) return false;
+  let best = null;
+  for (const pin of Object.keys(views.get(p.id)?.pins || {})) {
+    const xy = pinXY(p.id, pin);
+    if (!xy) continue;
+    for (const b of bbs) {
+      const h = holeUnder(b, xy, 6);
+      if (!h) continue;
+      const q = pinXY(b.id, h);
+      const d = Math.hypot(q[0] - xy[0], q[1] - xy[1]);
+      if (!best || d < best.d) best = { d, dx: q[0] - xy[0], dy: q[1] - xy[1] };
+    }
+  }
+  if (!best) return false;
+  p.x = Math.round((p.x + best.dx) * 100) / 100;
+  p.y = Math.round((p.y + best.dy) * 100) / 100;
+  return true;
+}
+// Place a part so one named leg sits in a breadboard hole: { A: '21t.a' }.
+function placeByPlug(p, plug) {
+  const b = doc.parts.find(isBB);
+  const [pin, hole] = Object.entries(plug || {})[0] || [];
+  if (!b || !pin) return false;
+  const q = pinXY(b.id, hole);
+  const xy = pinXY(p.id, pin);
+  if (!q || !xy) return false;
+  p.x = Math.round((p.x + q[0] - xy[0]) * 100) / 100;
+  p.y = Math.round((p.y + q[1] - xy[1]) * 100) / 100;
+  return true;
+}
+function resolvePlugs() {
+  let any = false;
+  for (const p of doc.parts) {
+    if (!p.plug) continue;
+    placeByPlug(p, p.plug);
+    delete p.plug;
+    placeView(p, views.get(p.id));
+    any = true;
+  }
+  // A wire from a board pin on the far side goes round the board instead of across it.
+  const lanes = new Map(); // keeps wires that go round the same side apart
+  for (const w of doc.wires) {
+    if (w.route !== 'board') continue;
+    delete w.route;
+    const p = partOf(w.a.part);
+    const v = views.get(p?.id);
+    const xy = pinXY(w.a.part, w.a.pin);
+    const to = pinXY(w.b.part, w.b.pin);
+    if (!v || !xy || !to || p.rot || to[0] < p.x + v.w || xy[0] > p.x + 16) continue;
+    const top = to[1] < p.y + v.h / 2;
+    const k = lanes.get(`${p.id}|${top}`) || 0;
+    lanes.set(`${p.id}|${top}`, k + 1);
+    const x = p.x - 9 - 6 * k;
+    const y = top ? p.y - 9 - 6 * k : p.y + v.h + 9 + 6 * k;
+    w.pts = [[x, xy[1]], [x, y], [to[0], y]];
+    any = true;
+  }
+  return any;
+}
+const pinWords = (part, pin) => (isBB(partOf(part)) ? `${part} ${holeLabel(pin)}` : `${part}.${pin}`);
 
 // ---------- persistence and history ----------
 // The open circuit autosaves; edited circuits are also kept in "My projects".
@@ -9241,7 +9695,7 @@ function updateHistBtns() {
 // ---------- part views ----------
 function makeView(p) {
   const div = document.createElement('div');
-  div.className = 'part';
+  div.className = isBB(p) ? 'part bb' : 'part';
   div.dataset.id = p.id;
   div.innerHTML = '<div class="body"></div><div class="badge" hidden></div>';
   const tag = document.createElement('div');
@@ -9355,6 +9809,72 @@ function pinXY(id, pin) {
 const pathOf = (pts) => `M${pts.map((q) => `${q[0].toFixed(1)} ${q[1].toFixed(1)}`).join('L')}`;
 const flowMode = () => $('flowSel').value;
 
+const wireLook = () => $('wireLook')?.value || 'real';
+// Realistic jumpers: a straight run sags into a gentle curve; corners at
+// bends are rounded like a bent wire.
+function smoothPath(pts) {
+  const f = (q) => `${q[0].toFixed(1)} ${q[1].toFixed(1)}`;
+  if (pts.length === 2) {
+    const [a, b] = pts;
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const L = Math.hypot(dx, dy);
+    if (L < 1) return `M${f(a)}L${f(b)}`;
+    let nx = -dy / L;
+    let ny = dx / L;
+    if (ny < 0 || (ny === 0 && nx < 0)) { nx = -nx; ny = -ny; } // sag downwards
+    const sag = Math.min(28, L * 0.14);
+    return `M${f(a)}Q${f([(a[0] + b[0]) / 2 + nx * sag, (a[1] + b[1]) / 2 + ny * sag])} ${f(b)}`;
+  }
+  let d = `M${f(pts[0])}`;
+  for (let k = 1; k < pts.length - 1; k++) {
+    const [p0, p1, p2] = [pts[k - 1], pts[k], pts[k + 1]];
+    const l1 = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
+    const l2 = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) || 1;
+    const r = Math.min(8, l1 / 2, l2 / 2);
+    d += `L${f([p1[0] - ((p1[0] - p0[0]) / l1) * r, p1[1] - ((p1[1] - p0[1]) / l1) * r])}Q${f(p1)} ${f([p1[0] + ((p2[0] - p1[0]) / l2) * r, p1[1] + ((p2[1] - p1[1]) / l2) * r])}`;
+  }
+  return `${d}L${f(pts.at(-1))}`;
+}
+// The plastic housing and metal pin at each end of a jumper wire.
+function jumperEnds(pts) {
+  let out = '';
+  for (const [e, n] of [[pts[0], pts[1]], [pts.at(-1), pts.at(-2)]]) {
+    let dx = n[0] - e[0];
+    let dy = n[1] - e[1];
+    if (pts.length === 2) dy += Math.min(28, Math.hypot(dx, dy) * 0.14) * 0.6 * Math.sign(Math.abs(dx)); // follow the sag
+    const L = Math.hypot(dx, dy) || 1;
+    const len = Math.min(7, L * 0.4);
+    const t = [e[0] + (dx / L) * len, e[1] + (dy / L) * len];
+    out += `<path class="jend" d="M${e[0].toFixed(1)} ${e[1].toFixed(1)}L${t[0].toFixed(1)} ${t[1].toFixed(1)}"/><circle class="jtip" cx="${e[0].toFixed(1)}" cy="${e[1].toFixed(1)}" r="1.3"/>`;
+  }
+  return out;
+}
+// Strips of holes to light up: the one under the pointer, plus any other
+// strip joined to it by wires or legs.
+let hoverHole = null;     // {part, pin} of the breadboard hole under the pointer
+let hoverPins = null;     // pin keys in the hovered net
+function bbOverlay() {
+  if (!hoverPins) return '';
+  let h = '';
+  const done = new Set();
+  for (const key of hoverPins) {
+    const i = key.indexOf(':');
+    const b = partOf(key.slice(0, i));
+    if (!isBB(b)) continue;
+    const geo = bbGeo(b);
+    const gi = geo.groupOf[key.slice(i + 1)];
+    if (gi === undefined || done.has(`${b.id}|${gi}`)) continue;
+    done.add(`${b.id}|${gi}`);
+    const [x0, y0, x1, y1] = stripBox(geo, geo.groups[gi]);
+    const main = hoverHole && hoverHole.part === b.id && geo.groupOf[hoverHole.pin] === gi;
+    h += `<g transform="translate(${b.x} ${b.y}) rotate(${b.rot || 0} ${geo.w / 2} ${geo.h / 2})"><rect class="strip${main ? ' main' : ''}" x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" rx="3"/>`;
+    for (const n of geo.groups[gi].names) { const [x, y] = geo.holes[n]; h += `<rect class="sh${main ? ' main' : ''}" x="${x - 2.2}" y="${y - 2.2}" width="4.4" height="4.4" rx=".8"/>`; }
+    h += '</g>';
+  }
+  return h;
+}
+
 // Points of a wire on screen, following a dragged end if there is one.
 function wirePoints(w, i) {
   let a = pinXY(w.a.part, w.a.pin);
@@ -9367,30 +9887,46 @@ function wirePoints(w, i) {
 }
 
 function renderWires() {
-  let h = '';
+  let h = bbOverlay();
   const showFlow = sim && flowMode() !== 'off';
+  const real = wireLook() === 'real';
+  let ends = '';
   doc.wires.forEach((w, i) => {
     const pts = wirePoints(w, i);
     if (!pts) return;
-    const d = pathOf(pts);
+    const d = real ? smoothPath(pts) : pathOf(pts);
     const on = sel?.kind === 'wire' && sel.i === i;
     const hl = hoverNet?.has(i) ? ' hl' : '';
     if (on) h += `<path class="wsel" d="${d}"/>`;
-    h += `<path class="wo${hl}" d="${d}"/><path class="w${on ? ' sel' : ''}${hl}" data-wire="${i}" style="stroke:${wireColor(w.color)}" d="${d}"/>`;
+    h += `<path class="wo${hl}${real ? ' real' : ''}" d="${d}"/><path class="w${on ? ' sel' : ''}${hl}${real ? ' real' : ''}" data-wire="${i}" style="stroke:${wireColor(w.color)}" d="${d}"/>`;
+    if (real) {
+      h += `<path class="wshine" d="${d}"/>`;
+      ends += jumperEnds(pts);
+    }
     if (showFlow) h += `<path class="flow${flowMode() === 'electrons' ? ' e' : ''}" data-fi="${i}" d="${d}" style="display:none"/>`;
   });
+  h += ends;
   const near = wdrag?.near;
   const targets = guideTargets();
+  const seated = new Set(plugs().map((w) => `${w.a.part}:${w.a.pin}`));
   for (const p of doc.parts) {
     const v = views.get(p.id);
     if (!v) continue;
+    const bb = isBB(p);
     for (const pin of Object.keys(v.pins)) {
+      const key = `${p.id}:${pin}`;
+      // Breadboard holes get no hit circles (there are hundreds); the board
+      // itself finds the hole under the pointer. Only highlighted ones show.
+      const isNear = near && near.part === p.id && near.pin === pin;
+      if (bb && !isNear && !targets.has(key)) continue;
       const xy = pinXY(p.id, pin);
       if (!xy) continue;
       let cls = 'pin';
-      if (near && near.part === p.id && near.pin === pin) cls += ' near';
-      else if (targets.has(`${p.id}:${pin}`)) cls += ' target';
-      h += `<circle class="${cls}" data-part="${esc(p.id)}" data-pin="${esc(pin)}" cx="${xy[0].toFixed(1)}" cy="${xy[1].toFixed(1)}" r="4"/>`;
+      if (isNear) cls += ' near';
+      else if (targets.has(key)) cls += ' target';
+      else if (seated.has(key)) cls += ' in';
+      if (hoverPins?.has(key)) cls += ' hl';
+      h += `<circle class="${cls}" data-part="${esc(p.id)}" data-pin="${esc(pin)}" cx="${xy[0].toFixed(1)}" cy="${xy[1].toFixed(1)}" r="${bb ? 3.4 : 4}"/>`;
     }
   }
   // Handles of the selected wire: round ends move it to another pin,
@@ -9441,6 +9977,7 @@ function netWires(start) {
   const adj = new Map();
   const link = (u, v, wi) => { if (!adj.has(u)) adj.set(u, []); adj.get(u).push([v, wi]); };
   doc.wires.forEach((w, i) => { const u = `${w.a.part}:${w.a.pin}`; const v = `${w.b.part}:${w.b.pin}`; link(u, v, i); link(v, u, i); });
+  for (const w of plugs()) { const u = `${w.a.part}:${w.a.pin}`; const v = `${w.b.part}:${w.b.pin}`; link(u, v, -1); link(v, u, -1); }
   for (const p of doc.parts) {
     const def = LIB[p.type];
     for (const g of def.internal ? def.internal(propsOf(p)) : []) for (let k = 1; k < g.length; k++) { link(`${p.id}:${g[0]}`, `${p.id}:${g[k]}`, -1); link(`${p.id}:${g[k]}`, `${p.id}:${g[0]}`, -1); }
@@ -9475,6 +10012,9 @@ function nearestPin(xy, exclude) {
 }
 
 function autoColor(a, b) {
+  const ends = [a, b].map((e) => (isBB(partOf(e.part)) ? e.pin : ''));
+  if (ends.some((x) => /^[tb]n\./.test(x))) return 'black';
+  if (ends.some((x) => /^[tb]p\./.test(x))) return 'red';
   const pins = [a.pin, b.pin].map((x) => x.toUpperCase());
   if (pins.some((x) => /^(GND|-|IN-|OUT-|COM\.?\d?|S)$|^GND/.test(x))) return 'black';
   if (pins.some((x) => /^(VIN|VCC|5V|3V3|3\.3V|\+|V\+|VM|IN\+|OUT\+|\+12V|\+5V|VOUT)$/.test(x))) return 'red';
@@ -9574,6 +10114,10 @@ stage.addEventListener('pointerdown', (e) => {
     return;
   }
   if (t.classList?.contains('pin')) { e.preventDefault(); onPin(t.dataset.part, t.dataset.pin); return; }
+  // A breadboard hole: tap to start or finish a wire there, drag to move the board.
+  const bbEl = t.closest?.('.part.bb');
+  const bbHole = bbEl ? holeUnder(partOf(bbEl.dataset.id), w) : null;
+  if (bbHole && draft) { e.preventDefault(); onPin(bbEl.dataset.id, bbHole); return; }
   if (draft) { draft.pts.push([snap(w[0]), snap(w[1])]); renderWires(); return; }
   const wireEl = t.closest?.('.w');
   if (wireEl) { select({ kind: 'wire', i: Number(wireEl.dataset.wire) }); return; }
@@ -9582,10 +10126,12 @@ stage.addEventListener('pointerdown', (e) => {
     const id = partEl.dataset.id;
     const p = partOf(id);
     const def = LIB[p.type];
-    select({ kind: 'part', id });
+    if (!bbHole) select({ kind: 'part', id });
     if (running && partEl.classList.contains('live')) return;
     if (running && def.interactive === 'toggle') { setProp(id, 'on', !propsOf(p).on); return; }
-    drag = { id, start: w, ox: p.x, oy: p.y, moved: false };
+    drag = { id, start: w, ox: p.x, oy: p.y, moved: false, hole: bbHole, plugs: plugKey() };
+    // A breadboard carries everything plugged into it.
+    if (isBB(p)) drag.carry = [...new Set(plugs().filter((q) => q.b.part === id).map((q) => q.a.part))].map((pid) => { const q = partOf(pid); return { p: q, ox: q.x, oy: q.y }; });
     stage.setPointerCapture(e.pointerId);
     return;
   }
@@ -9626,8 +10172,12 @@ stage.addEventListener('pointermove', (e) => {
     const p = partOf(drag.id);
     const nx = snap(drag.ox + w[0] - drag.start[0]);
     const ny = snap(drag.oy + w[1] - drag.start[1]);
-    if (!drag.moved && (nx !== p.x || ny !== p.y)) { drag.moved = true; pushHistory(); }
+    if (!drag.moved && (nx !== p.x || ny !== p.y)) { drag.moved = true; pushHistory(); if (drag.hole) select({ kind: 'part', id: p.id }); }
+    if (!drag.moved) return;
     p.x = nx; p.y = ny;
+    if (drag.carry) {
+      for (const c of drag.carry) { c.p.x = c.ox + nx - drag.ox; c.p.y = c.oy + ny - drag.oy; placeView(c.p, views.get(c.p.id)); }
+    } else seat(p);
     placeView(p, views.get(p.id));
     queueWires();
     return;
@@ -9670,9 +10220,18 @@ function endPointer(e) {
     renderWires();
     return;
   }
-  if (drag?.moved) save();
+  const dr = drag;
   drag = null;
   pan = null;
+  if (dr && !dr.moved && dr.hole) { onPin(dr.id, dr.hole); return; }
+  if (dr?.moved) {
+    // Plugging a leg in or pulling it out changes the circuit.
+    if (plugKey() !== dr.plugs) {
+      const now = plugs().filter((q) => q.a.part === dr.id);
+      if (!isBB(partOf(dr.id))) toast(now.length ? `${dr.id} plugged in: ${now.map((q) => `${q.a.pin} → ${holeLabel(q.b.pin)}`).join(', ')}` : `${dr.id} unplugged from the breadboard`);
+      changed(true);
+    } else save();
+  }
 }
 stage.addEventListener('pointerup', endPointer);
 stage.addEventListener('pointercancel', endPointer);
@@ -9705,16 +10264,15 @@ stage.addEventListener('dblclick', (e) => {
     renderWires();
   }
 });
-function setHover(pinKey) {
-  const next = pinKey ? netWires(pinKey).wires : null;
-  const same = next && hoverNet && next.size === hoverNet.size && [...next].every((x) => hoverNet.has(x));
-  if (same || (!next && !hoverNet)) return;
-  hoverNet = next;
-  for (const el of wiresSvg.querySelectorAll('.w, .wo')) el.classList.remove('hl');
-  if (!hoverNet) return;
-  for (const el of wiresSvg.querySelectorAll('.w')) {
-    if (hoverNet.has(Number(el.dataset.wire))) { el.classList.add('hl'); el.previousElementSibling?.classList.add('hl'); }
-  }
+function setHover(pinKey, hole = null) {
+  const net = pinKey ? netWires(pinKey) : null;
+  const holeSame = (hole?.part || '') === (hoverHole?.part || '') && (hole?.pin || '') === (hoverHole?.pin || '');
+  const pinsSame = net ? !!hoverPins && net.pins.size === hoverPins.size && [...net.pins].every((k) => hoverPins.has(k)) : !hoverPins;
+  hoverHole = hole;
+  if (pinsSame && holeSame) return;
+  hoverNet = net ? net.wires : null;
+  hoverPins = net ? net.pins : null;
+  queueWires();
 }
 stage.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -9729,13 +10287,24 @@ function showTip(e) {
   const tip = $('tip');
   const t = e.target;
   const wireEl = t.closest?.('.w');
-  if (!t.classList?.contains('pin') && !wireEl) { tip.hidden = true; setHover(null); return; }
+  const bbEl = !wireEl && !t.classList?.contains('pin') ? t.closest?.('.part.bb') : null;
+  const bbPart = bbEl ? partOf(bbEl.dataset.id) : null;
+  const hole = bbPart ? holeUnder(bbPart, toWorld(e)) : null;
+  if (!t.classList?.contains('pin') && !wireEl && !hole) { tip.hidden = true; setHover(null); return; }
   let text;
-  if (wireEl) {
+  if (hole) {
+    const key = `${bbPart.id}:${hole}`;
+    setHover(key, { part: bbPart.id, pin: hole });
+    const others = [...netWires(key).pins].filter((k) => !isBB(partOf(k.split(':')[0]))).map((k) => k.replace(':', '.'));
+    text = `${bbPart.id} ${holeLabel(hole)}. ${stripText(bbGeo(bbPart), hole)} `;
+    text += others.length ? `Connected here: ${others.slice(0, 5).join(', ')}${others.length > 5 ? '…' : ''}.` : 'Nothing connected yet.';
+    if (sim) { const n = sim.node(bbPart.id, hole); if (n >= 0 && !sim.floating[n]) text += ` ${sim.V[n].toFixed(2)} V.`; }
+    text += draft ? ' Click to end the wire here.' : ' Click to start a wire here.';
+  } else if (wireEl) {
     const i = Number(wireEl.dataset.wire);
     const w = doc.wires[i];
     setHover(`${w.a.part}:${w.a.pin}`);
-    text = `Wire ${w.a.part}.${w.a.pin} → ${w.b.part}.${w.b.pin}`;
+    text = `Wire ${pinWords(w.a.part, w.a.pin)} → ${pinWords(w.b.part, w.b.pin)}`;
     if (sim && flowNow) {
       const I = flowNow[i] || 0;
       const mag = Math.abs(I);
@@ -9752,7 +10321,9 @@ function showTip(e) {
       const n = sim.node(part, pin);
       if (n >= 0) text += sim.floating[n] ? ' · not driven' : ` · ${sim.V[n].toFixed(2)} V`;
     }
-    const others = [...netWires(`${part}:${pin}`).pins].filter((k) => k !== `${part}:${pin}`).map((k) => k.replace(':', '.'));
+    const hold = !isBB(p) && plugs().find((q) => q.a.part === part && q.a.pin === pin);
+    if (hold) text += ` · plugged into ${hold.b.part} ${holeLabel(hold.b.pin)}`;
+    const others = [...netWires(`${part}:${pin}`).pins].filter((k) => k !== `${part}:${pin}` && !isBB(partOf(k.split(':')[0]))).map((k) => k.replace(':', '.'));
     text += others.length ? ` · connected to ${others.slice(0, 4).join(', ')}${others.length > 4 ? '…' : ''}` : ' · click to start a wire';
   }
   tip.textContent = text;
@@ -9852,6 +10423,7 @@ async function addPart(type) {
   await v.ready;
   if (exPart) {
     [p.x, p.y] = [exPart.x, exPart.y];
+    if (exPart.plug) { p.rot = exPart.rot || 0; placeView(p, v); placeByPlug(p, exPart.plug); }
     placeView(p, v);
     sel = { kind: 'part', id: p.id };
     changed(true);
@@ -9918,7 +10490,7 @@ function changed(structural) {
 function newSim() {
   serialBuf.clear();
   graphReset();
-  const s = new Bench(clone(doc), LIB, {
+  const s = new Bench(simDoc(), LIB, {
     firmware: FW,
     onSerial: (id, text) => {
       graphSerial(id, text);
@@ -10047,9 +10619,9 @@ function allIssues() {
   const out = new Map();
   if (!doc) return [];
   const add = (it) => { const k = issueKey(it.part, it.text); if (!out.has(k)) out.set(k, it); };
-  try { for (const it of new Bench(clone(doc), LIB, { firmware: FW }).staticIssues()) add(it); } catch (err) { add({ level: 'fail', part: '', text: err.message }); }
+  try { for (const it of new Bench(simDoc(), LIB, { firmware: FW }).staticIssues()) add(it); } catch (err) { add({ level: 'fail', part: '', text: err.message }); }
   for (const p of doc.parts) {
-    if (!doc.wires.some((w) => w.a.part === p.id || w.b.part === p.id)) add({ level: 'warn', part: p.id, type: p.type, text: 'Not wired to anything yet', fix: 'Click one of its pins, then the pin it should connect to.' });
+    if (!isBB(p) && !isWired(p.id)) add({ level: 'warn', part: p.id, type: p.type, text: 'Not wired to anything yet', fix: doc.parts.some(isBB) ? 'Drag it onto the breadboard so its legs drop into holes, or click one of its pins, then the pin it should connect to.' : 'Click one of its pins, then the pin it should connect to.' });
   }
   for (const it of lastCheck?.issues || []) add(it);
   if (sim) for (const it of sim.issues.values()) add(it);
@@ -10078,7 +10650,7 @@ function liveUi() {
 // Run the circuit for 5 simulated seconds without drawing, to collect problems.
 function quickCheck() {
   try {
-    const s = new Bench(clone(doc), LIB, { firmware: FW });
+    const s = new Bench(simDoc(), LIB, { firmware: FW });
     const t0 = performance.now();
     while (s.timeUs < 5e6 && performance.now() - t0 < 4000) s.advance(50);
     lastCheck = { issues: [...s.issues.values()], seconds: s.timeUs / 1e6, ran: true };
@@ -10090,8 +10662,9 @@ function quickCheck() {
 }
 
 // ---------- guide: steps, targets, what next ----------
-const exampleOf = () => (doc?.exampleId ? exampleFor(doc.exampleId, doc.exampleBoard || boardOfExample(doc)) : null);
+const exampleOf = () => (doc?.exampleId ? exampleFor(doc.exampleId, doc.exampleBoard || boardOfExample(doc), doc.exampleLayout || 'wires') : null);
 const pinName = (type, pin) => {
+  if (LIB[type]?.breadboard) return holeLabel(pin);
   if (type === 'wokwi-led') return pin === 'A' ? 'A (long leg)' : pin === 'C' ? 'C (short leg)' : pin;
   if (/^\d+$/.test(pin) && type !== 'wokwi-arduino-uno') return `pin ${pin}`;
   return pin;
@@ -10102,7 +10675,8 @@ function guideSteps(ex) {
   const steps = [];
   for (const p of ex.parts) {
     const def = LIB[p.type];
-    steps.push({ kind: 'add', id: p.id, type: p.type, text: `Add ${/^(LED|[AEIOU])/.test(def.name) ? 'an' : 'a'} ${def.name}`, sub: `It will be called ${p.id}. ${PART_INFO[p.type]?.about.split('. ')[0] || ''}.` });
+    const into = p.plug ? ` Its ${Object.keys(p.plug)[0]} leg goes into ${holeLabel(Object.values(p.plug)[0])}; the other legs follow in the holes next to it.` : '';
+    steps.push({ kind: 'add', id: p.id, type: p.type, text: `Add ${/^(LED|[AEIOU])/.test(def.name) ? 'an' : 'a'} ${def.name}`, sub: `It will be called ${p.id}. ${PART_INFO[p.type]?.about.split('. ')[0] || ''}.${into}` });
     for (const [k, v] of Object.entries(p.props || {})) {
       const spec = def.props?.[k];
       if (!spec || String(defaults(def)[k]) === String(v)) continue;
@@ -10114,7 +10688,8 @@ function guideSteps(ex) {
     const ta = ex.parts.find((p) => p.id === w.a.part)?.type;
     const tb = ex.parts.find((p) => p.id === w.b.part)?.type;
     const da = pinInfo(ta, w.a.pin);
-    steps.push({ kind: 'wire', i, a: w.a, b: w.b, color: w.color, text: `Wire ${w.a.part} ${pinName(ta, w.a.pin)} → ${w.b.part} ${pinName(tb, w.b.pin)}`, sub: `Click the pulsing pin on ${w.a.part}, then the one on ${w.b.part}.${da ? ` (${w.a.part} ${w.a.pin}: ${da})` : ''}` });
+    const bbA = LIB[ta]?.breadboard;
+    steps.push({ kind: 'wire', i, a: w.a, b: w.b, color: w.color, text: `Wire ${w.a.part} ${pinName(ta, w.a.pin)} → ${w.b.part} ${pinName(tb, w.b.pin)}`, sub: `Click the pulsing ${bbA ? 'hole' : 'pin'} on ${w.a.part}, then the one on ${w.b.part}.${da && !bbA ? ` (${w.a.part} ${w.a.pin}: ${da})` : ''}` });
   });
   steps.push({ kind: 'run', text: 'Press ▶ Run', sub: ex.run || 'Watch it work.' });
   return steps;
@@ -10193,16 +10768,23 @@ async function guideDo() {
 }
 
 function startGuidedBuild(ex) {
-  loadDoc({ name: `${ex.name} (my build)`, note: ex.note, exampleId: ex.id, exampleBoard: ex.board, guided: true, parts: [], wires: [] }, 'Build it step by step: follow the yellow box');
+  loadDoc({ name: `${ex.name} (my build)`, note: ex.note, exampleId: ex.id, exampleBoard: ex.board, exampleLayout: ex.layout, guided: true, parts: [], wires: [] }, 'Build it step by step: follow the yellow box');
   tab = 'guide';
 }
 
 // Open an example laid out for a board (ESP32 or Uno), or start its guided build.
-function openExample(id, board = exBoard, guided = false, msg) {
-  const ex = exampleFor(id, board);
+function openExample(id, board = exBoard, guided = false, msg, layout = exLayout) {
+  const ex = exampleFor(id, board, layout);
   if (!ex) return;
   if (guided) { startGuidedBuild(ex); return; }
-  loadDoc({ ...clone(ex), exampleId: ex.id, exampleBoard: ex.board }, msg === undefined ? `Loaded “${ex.name}”. Press ▶ Run, or open Guide to build it step by step.` : msg);
+  const bbMsg = ex.layout === 'bb' ? ' Hover any breadboard hole to see what it is connected to.' : '';
+  loadDoc({ ...clone(ex), exampleId: ex.id, exampleBoard: ex.board, exampleLayout: ex.layout }, msg === undefined ? `Loaded “${ex.name}”. Press ▶ Run, or open Guide to build it step by step.${bbMsg}` : msg);
+}
+
+function setExLayout(layout) {
+  exLayout = layout === 'wires' ? 'wires' : 'bb';
+  store.set('circuit-bench-layout', exLayout);
+  renderExMenu();
 }
 
 function setExBoard(board) {
@@ -10215,7 +10797,7 @@ function setExBoard(board) {
 function nextSteps() {
   const out = [];
   if (!doc.parts.length) return ['Add a board (ESP32 or Arduino Uno) or a battery from the parts list.', 'Or open Examples and pick “LED + resistor on a 9 V battery”.'];
-  const unwired = doc.parts.filter((p) => !doc.wires.some((w) => w.a.part === p.id || w.b.part === p.id));
+  const unwired = doc.parts.filter((p) => !isBB(p) && !isWired(p.id));
   if (unwired.length) out.push(`Wire ${unwired.map((p) => p.id).join(', ')}: click one of its pins, then the pin it should connect to.`);
   const issues = allIssues();
   const fails = issues.filter((i) => i.level === 'fail');
@@ -10235,6 +10817,7 @@ function guideHtml() {
     return `<h3>${esc(doc.name || 'Untitled circuit')}</h3>${doc.note ? `<p>${esc(doc.note)}</p>` : ''}${nextCard}
       <div class="card"><h4>Learn by building</h4><p style="margin:0 0 6px">Pick an example; the guide walks you through placing every part and wire, then checks it works.</p>
       <div class="row" style="margin:0 0 6px"><span>Board:</span>${boardPickHtml(exBoard, 'ex-pref')}</div>
+      <div class="row" style="margin:0 0 6px"><span>Build:</span>${layoutPickHtml(exLayout, 'ex-lpref')}</div>
       ${EXAMPLES.map((ex) => `<div class="row" style="justify-content:space-between;margin:4px 0"><span>${esc(exLabel(ex))}</span><span class="row"><button data-act="ex-open" data-ex="${ex.id}">Open</button><button data-act="ex-build" data-ex="${ex.id}" class="primary">Build step by step</button></span></div>`).join('')}</div>
       ${howToHtml()}`;
   }
@@ -10242,7 +10825,8 @@ function guideHtml() {
   const steps = g.steps.map((st, i) => `<li class="${g.done[i] ? 'done' : ''}${i === g.cur && doc.guided ? ' cur' : ''}"><span class="ck">${g.done[i] ? '✓' : i + 1}</span><span>${esc(st.text)}${i === g.cur && doc.guided ? `<div class="muted" style="font-size:12.5px">${esc(st.sub || '')}</div>` : ''}</span></li>`).join('');
   const boards = exampleBoards(EXAMPLES.find((x) => x.id === g.ex.id));
   const boardRow = boards.length > 1 ? `<div class="row" style="margin:0 0 8px"><span>Board:</span>${boardPickHtml(g.ex.board, 'ex-board')}<span class="muted" style="font-size:12.5px">The wiring follows the pins the sketch uses on each board.</span></div>` : '';
-  return `<h3>${esc(g.ex.name)}</h3>${boardRow}
+  const layoutRow = hasBreadboard(g.ex.id) ? `<div class="row" style="margin:0 0 8px"><span>Build:</span>${layoutPickHtml(g.ex.layout || 'wires', 'ex-layout')}${g.ex.layout === 'bb' ? '<span class="muted" style="font-size:12.5px">Hover any hole to see which holes are connected.</span>' : ''}</div>` : '';
+  return `<h3>${esc(g.ex.name)}</h3>${boardRow}${layoutRow}
     <div class="card"><h4>How it works</h4><p style="margin:0">${esc(g.ex.learn || g.ex.note || '')}</p></div>
     ${doc.guided ? `<div class="row" style="justify-content:space-between"><b>Build steps · ${doneN} of ${g.steps.length} done</b>${g.cur >= 0 ? '<button data-act="guide-do" class="primary">Do the next step for me</button>' : ''}</div>`
     : `<div class="row" style="justify-content:space-between"><b>How it is built</b><button data-act="ex-build" data-ex="${g.ex.id}" class="primary">Build it myself, step by step</button></div>`}
@@ -10380,12 +10964,16 @@ function paintReadings() {
   const its = allIssues().filter((i) => i.part === id && i.level !== 'info');
   $('partIssues').innerHTML = its.map(issueHtml).join('');
   const v = views.get(id);
-  const pins = Object.keys(v?.pins || {});
+  const links = [...doc.wires, ...plugs().map((w) => ({ ...w, plug: true }))];
+  const bb = isBB(partOf(id));
+  // A breadboard lists only the holes in use (it has hundreds).
+  const pins = bb ? [...new Set(links.flatMap((w) => [w.a, w.b]).filter((e) => e.part === id).map((e) => e.pin))] : Object.keys(v?.pins || {});
+  if (bb && !pins.length) { $('pinTable').innerHTML = '<div class="muted">Nothing plugged in yet. Drag a part onto the board so its legs drop into holes, or click a hole to start a wire.</div>'; return; }
   $('pinTable').innerHTML = `<table>${pins.map((pin) => {
     const n = sim ? sim.node(id, pin) : -1;
     const volts = n >= 0 && !sim.floating[n] ? `${sim.V[n].toFixed(2)} V` : '';
-    const to = doc.wires.filter((w) => (w.a.part === id && w.a.pin === pin) || (w.b.part === id && w.b.pin === pin))
-      .map((w) => (w.a.part === id && w.a.pin === pin ? `${w.b.part}.${w.b.pin}` : `${w.a.part}.${w.a.pin}`));
+    const to = links.filter((w) => (w.a.part === id && w.a.pin === pin) || (w.b.part === id && w.b.pin === pin))
+      .map((w) => { const o = w.a.part === id && w.a.pin === pin ? w.b : w.a; return w.plug ? (bb ? `${o.part}.${o.pin} plugged in` : `plugged into ${pinWords(o.part, o.pin)}`) : pinWords(o.part, o.pin); });
     const desc = pinInfo(partOf(id).type, pin);
     return `<tr><th>${esc(pin)}</th><td>${esc(to.join(', ')) || '<span class="muted">not wired</span>'}${desc ? `<div class="pindesc">${esc(desc)}</div>` : ''}</td><td class="num">${volts}</td></tr>`;
   }).join('')}</table>`;
@@ -10440,7 +11028,7 @@ function bomLines() {
   for (const l of lines.values()) if (l.kit) l.qty = 1;
   if (doc.wires.length) add('jumpers', { label: 'Jumper wires (male–male and male–female, 40 each)', search: 'jumper wires male to male male to female 40 pcs', inr: [100, 180], qty: 1 });
   const small = doc.parts.some((p) => !LIB[p.type].mcu && !String(p.type).startsWith('bench-battery'));
-  if (small) add('breadboard', { label: 'Breadboard (830 points)', search: 'breadboard 830 points', inr: [80, 150], qty: 1 });
+  if (small && !doc.parts.some(isBB)) add('breadboard', { label: 'Breadboard (830 points)', search: 'breadboard 830 points', inr: [80, 150], qty: 1 });
   return [...lines.values()];
 }
 
@@ -10947,11 +11535,11 @@ function graphLanes() {
 }
 function probeOptions() {
   let s = sim;
-  if (!s) { try { s = new Bench(clone(doc), LIB, { firmware: {} }); } catch { s = null; } }
+  if (!s) { try { s = new Bench(simDoc(), LIB, { firmware: {} }); } catch { s = null; } }
   const pins = [];
   const reads = [];
   for (const p of doc.parts) {
-    for (const pin of Object.keys(views.get(p.id)?.pins || {})) if (!/^GND/.test(pin)) pins.push([`pin|${p.id}|${pin}`, `${p.id}.${pin}`]);
+    if (!isBB(p)) for (const pin of Object.keys(views.get(p.id)?.pins || {})) if (!/^GND/.test(pin)) pins.push([`pin|${p.id}|${pin}`, `${p.id}.${pin}`]);
     let rows = [];
     try { rows = s ? s.readings(p.id) : []; } catch { rows = []; }
     for (const [k, v] of rows) if (!Number.isNaN(readingNumber(v)) && !/Capacity/.test(k)) reads.push([`rd|${p.id}|${k}`, `${p.id} · ${k}`]);
@@ -11142,7 +11730,15 @@ tabBody.addEventListener('click', (e) => {
     const ex = exampleOf();
     if (!ex || ex.board === b.dataset.board) return;
     setExBoard(b.dataset.board);
-    openExample(ex.id, exBoard, !!doc.guided, `Switched to ${BOARD_NAMES[exBoard]}: parts and wires moved to the pins the sketch uses on this board.`);
+    openExample(ex.id, exBoard, !!doc.guided, `Switched to ${BOARD_NAMES[exBoard]}: parts and wires moved to the pins the sketch uses on this board.`, ex.layout || 'wires');
+    return;
+  }
+  if (act === 'ex-lpref') { setExLayout(b.dataset.layout); renderSide(); return; }
+  if (act === 'ex-layout') {
+    const ex = exampleOf();
+    if (!ex || (ex.layout || 'wires') === b.dataset.layout) return;
+    setExLayout(b.dataset.layout);
+    openExample(ex.id, ex.board || exBoard, !!doc.guided, exLayout === 'bb' ? 'Moved onto a breadboard: hover a hole to see which holes are connected.' : 'Back to plain wires, no breadboard.');
     return;
   }
   if (act === 'guide-do') { guideDo(); return; }
@@ -11301,7 +11897,7 @@ function loadDoc(d, msg) {
   pauseRun();
   sim = null;
   lastCheck = null;
-  doc = { name: d.name || 'Untitled circuit', note: d.note || '', exampleId: d.exampleId || (EXAMPLES.some((x) => x.id === d.id) ? d.id : undefined), exampleBoard: d.exampleBoard || undefined, guided: !!d.guided, guideHidden: !!d.guideHidden,
+  doc = { name: d.name || 'Untitled circuit', note: d.note || '', exampleId: d.exampleId || (EXAMPLES.some((x) => x.id === d.id) ? d.id : undefined), exampleBoard: d.exampleBoard || undefined, exampleLayout: d.exampleLayout || undefined, guided: !!d.guided, guideHidden: !!d.guideHidden,
     parts: d.parts.map((p) => ({ rot: 0, props: {}, ...p })), wires: d.wires.map((w) => ({ pts: [], ...w })), firmware: d.firmware || {},
     probes: Array.isArray(d.probes) ? d.probes : [], plotSerial: d.plotSerial || undefined,
     projectId: d.projectId || newProjectId(), touched: !!d.touched };
@@ -11313,7 +11909,7 @@ function loadDoc(d, msg) {
   $('projName').value = doc.name;
   serialBuf.clear();
   updateClock();
-  rebuildAll().then(() => { fit(); changed(false); updateRunBtn(); if (msg) toast(msg); });
+  rebuildAll().then(() => { if (resolvePlugs()) renderWires(); fit(); changed(false); updateRunBtn(); if (msg) toast(msg); });
 }
 
 // Wokwi diagram.json: same part names and pin names for the parts both tools have.
@@ -11356,7 +11952,7 @@ function exportWokwi() {
     parts.push({ type: p.type, id: p.id, top: p.y, left: p.x, ...(p.rot ? { rotate: p.rot } : {}), attrs });
   }
   const ok = new Set(parts.map((p) => p.id));
-  const connections = doc.wires.filter((w) => ok.has(w.a.part) && ok.has(w.b.part)).map((w) => [`${w.a.part}:${w.a.pin}`, `${w.b.part}:${w.b.pin}`, w.color || 'green', []]);
+  const connections = [...doc.wires, ...plugs()].filter((w) => ok.has(w.a.part) && ok.has(w.b.part)).map((w) => [`${w.a.part}:${w.a.pin}`, `${w.b.part}:${w.b.pin}`, w.color || 'green', []]);
   const out = { version: 1, author: 'Circuit Bench', editor: 'wokwi', parts, connections, dependencies: {} };
   textDialog('Wokwi diagram.json', JSON.stringify(out, null, 2), 'diagram.json',
     `Paste this into diagram.json of a Wokwi project.${skipped ? ` ${skipped} part(s) Wokwi does not have (batteries, drivers, motors…) were left out.` : ''}`);
@@ -11368,20 +11964,30 @@ $('exBtn').onclick = (e) => { e.stopPropagation(); const m = $('exMenu'); const 
 $('fileBtn').onclick = (e) => { e.stopPropagation(); const m = $('fileMenu'); const open = m.hidden; closeMenus(); m.hidden = !open; };
 document.addEventListener('click', (e) => { if (!e.target.closest('.menu')) closeMenus(); });
 function renderExMenu() {
-  $('exMenu').innerHTML = `<div class="exboard"><span>Board:</span>${boardPickHtml(exBoard, 'menu-board')}</div><hr>`
+  $('exMenu').innerHTML = `<div class="exboard"><span>Board:</span>${boardPickHtml(exBoard, 'menu-board')}</div><div class="exboard"><span>Build:</span>${layoutPickHtml(exLayout, 'menu-layout')}</div><hr>`
     + EXAMPLES.map((ex) => `<button data-ex="${ex.id}">${esc(exLabel(ex))}</button>`).join('');
 }
 renderExMenu();
 $('exMenu').onclick = (e) => {
   const b = e.target.closest('button');
   if (!b) return;
+  if (b.dataset.layout) {
+    e.stopPropagation();
+    setExLayout(b.dataset.layout);
+    const cur = exampleOf();
+    if (cur && hasBreadboard(cur.id) && (cur.layout || 'wires') !== exLayout) {
+      openExample(cur.id, cur.board || exBoard, !!doc.guided, exLayout === 'bb' ? 'Moved onto a breadboard: hover a hole to see which holes are connected.' : 'Back to plain wires, no breadboard.');
+    }
+    if (tab === 'guide') renderSide();
+    return;
+  }
   if (b.dataset.board) {
     // Pick the board for the examples; an open example follows it.
     e.stopPropagation(); // the menu is redrawn, so keep it open
     setExBoard(b.dataset.board);
     const cur = exampleOf();
     if (cur && cur.board && cur.board !== exBoard && exampleBoards(EXAMPLES.find((x) => x.id === cur.id)).includes(exBoard)) {
-      openExample(cur.id, exBoard, !!doc.guided, `Switched to ${BOARD_NAMES[exBoard]}: parts and wires moved to the pins the sketch uses on this board.`);
+      openExample(cur.id, exBoard, !!doc.guided, `Switched to ${BOARD_NAMES[exBoard]}: parts and wires moved to the pins the sketch uses on this board.`, cur.layout || 'wires');
     }
     if (tab === 'guide') renderSide();
     return;
@@ -11414,6 +12020,8 @@ $('stopBtn').onclick = stopSim;
 $('undoBtn').onclick = undo;
 $('redoBtn').onclick = redo;
 $('flowSel').onchange = () => { flowOffset.length = 0; renderWires(); updateRunBtn(); };
+if (store.get('circuit-bench-wires') === 'flat') $('wireLook').value = 'flat';
+$('wireLook').onchange = () => { store.set('circuit-bench-wires', $('wireLook').value); renderWires(); };
 
 let toastTimer = 0;
 function toast(msg) {
@@ -11444,6 +12052,9 @@ history.length = 0;
 future.length = 0;
 updateHistBtns();
 updateRunBtn();
+
+// Hook for the automated tests (tests/breadboard-examples.mjs).
+globalThis.__bench = { openExample, simDoc, doc: () => doc };
 
 return {  };
 })();
