@@ -131,7 +131,7 @@ a { color: var(--accent); }
 .menu > div { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px #0003; padding: 4px; min-width: 240px; }
 .menu > div button { display: block; width: 100%; text-align: left; border: none; background: none; padding: 6px 10px; }
 .menu > div button:hover { background: var(--soft); }
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .seg button, .menu > div .seg button { display: inline-block; width: auto; border: none; border-radius: 0; background: var(--soft); padding: 4px 10px; }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.on, .menu > div .seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
@@ -7184,11 +7184,21 @@ globalThis.SKETCH_SRC = {"blink":"// Blink: an LED on LED_PIN turns on and off e
 globalThis.SHIM_SRC = {"Arduino.h":"// Minimal Arduino-ESP32 API for running sketches inside the digital twin.\n// Compiled to WebAssembly with no C library: every hardware call is\n// forwarded to JavaScript (src/twin-core.js), which models the circuit.\n#pragma once\n#include <stdint.h>\n#include <stddef.h>\n#include <stdarg.h>\n\nnamespace std {\ntemplate <class E> class initializer_list {\n  const E* b_;\n  size_t n_;\n  constexpr initializer_list(const E* b, size_t n) : b_(b), n_(n) {}\n public:\n  constexpr initializer_list() : b_(nullptr), n_(0) {}\n  constexpr size_t size() const { return n_; }\n  constexpr const E* begin() const { return b_; }\n  constexpr const E* end() const { return b_ + n_; }\n};\n}  // namespace std\n\n#define PROGMEM\n#define HIGH 1\n#define LOW 0\n#define INPUT 0x01\n#define OUTPUT 0x03\n#define INPUT_PULLUP 0x05\n#define INPUT_PULLDOWN 0x09\n\n#define HW_IMPORT(name) __attribute__((import_module(\"env\"), import_name(name)))\n\nextern \"C\" {\nHW_IMPORT(\"millis\") uint32_t hw_millis();\nHW_IMPORT(\"micros\") uint32_t hw_micros();\nHW_IMPORT(\"delay_us\") void hw_delay_us(uint32_t us);\nHW_IMPORT(\"pin_mode\") void hw_pin_mode(int pin, int mode);\nHW_IMPORT(\"digital_write\") void hw_digital_write(int pin, int val);\nHW_IMPORT(\"digital_read\") int hw_digital_read(int pin);\nHW_IMPORT(\"pulse_in\") uint32_t hw_pulse_in(int pin, int state, uint32_t timeout_us);\nHW_IMPORT(\"analog_mv\") uint32_t hw_analog_mv(int pin);\nHW_IMPORT(\"analog_raw\") int hw_analog_raw(int pin);\nHW_IMPORT(\"analog_write\") void hw_analog_write(int pin, int value);\nHW_IMPORT(\"ledc_attach\") int hw_ledc_attach(int pin, uint32_t freq, int bits);\nHW_IMPORT(\"ledc_write\") int hw_ledc_write(int pin, uint32_t duty);\nHW_IMPORT(\"serial_write\") void hw_serial_write(const char* p, int len);\nHW_IMPORT(\"serial_available\") int hw_serial_available();\nHW_IMPORT(\"serial_read\") int hw_serial_read();\n\nvoid* memcpy(void* d, const void* s, size_t n);\nvoid* memset(void* d, int c, size_t n);\nint memcmp(const void* a, const void* b, size_t n);\nsize_t strlen(const char* s);\nint strcmp(const char* a, const char* b);\nint vsnprintf(char* buf, size_t cap, const char* fmt, va_list ap);\nint snprintf(char* buf, size_t cap, const char* fmt, ...);\nint sscanf(const char* s, const char* fmt, ...);\n}\n\ninline uint32_t millis() { return hw_millis(); }\ninline uint32_t micros() { return hw_micros(); }\ninline void delay(uint32_t ms) { hw_delay_us(ms * 1000); }\ninline void delayMicroseconds(uint32_t us) { hw_delay_us(us); }\ninline void pinMode(int pin, int mode) { hw_pin_mode(pin, mode); }\ninline void digitalWrite(int pin, int val) { hw_digital_write(pin, val ? 1 : 0); }\ninline int digitalRead(int pin) { return hw_digital_read(pin); }\ninline unsigned long pulseIn(int pin, int state, unsigned long timeout = 1000000) {\n  return hw_pulse_in(pin, state, timeout);\n}\ninline uint32_t analogReadMilliVolts(int pin) { return hw_analog_mv(pin); }\ninline int analogRead(int pin) { return hw_analog_raw(pin); }      // 12-bit on ESP32, 10-bit on Uno\ninline void analogWrite(int pin, int value) { hw_analog_write(pin, value); }  // 8-bit PWM\n#ifdef BOARD_UNO\n#define A0 14\n#define A1 15\n#define A2 16\n#define A3 17\n#define A4 18\n#define A5 19\n#define LED_BUILTIN 13\n#else\n#define A0 36\n#define A3 39\n#define A4 32\n#define A5 33\n#define A6 34\n#define A7 35\n#define LED_BUILTIN 2\n#endif\ninline bool ledcAttach(int pin, uint32_t freq, int bits) { return hw_ledc_attach(pin, freq, bits); }\ninline bool ledcWrite(int pin, uint32_t duty) { return hw_ledc_write(pin, duty); }\n\ninline int abs(int x) { return x < 0 ? -x : x; }\ntemplate <class T, class U> inline T max(T a, U b) { return a > (T)b ? a : (T)b; }\ntemplate <class T, class U> inline T min(T a, U b) { return a < (T)b ? a : (T)b; }\ntemplate <class T, class L, class H> inline T constrain(T x, L lo, H hi) {\n  return x < (T)lo ? (T)lo : (x > (T)hi ? (T)hi : x);\n}\n\ninline long map(long x, long inMin, long inMax, long outMin, long outMax) {\n  return inMax == inMin ? outMin : (x - inMin) * (outMax - outMin) / (inMax - inMin) + outMin;\n}\ninline uint32_t& randomState() { static uint32_t s = 12345; return s; }\ninline void randomSeed(unsigned long seed) { randomState() = seed ? (uint32_t)seed : 1; }\ninline long random(long hi) {\n  uint32_t& s = randomState();\n  s ^= s << 13; s ^= s >> 17; s ^= s << 5;\n  return hi > 0 ? (long)(s % (uint32_t)hi) : 0;\n}\ninline long random(long lo, long hi) { return hi > lo ? lo + random(hi - lo) : lo; }\n#ifndef PI\n#define PI 3.1415926535897932384626433832795\n#endif\ntemplate <class T> inline T sq(T x) { return x * x; }\n#define DEC 10\n#define HEX 16\n#define BIN 2\n\n// Fixed-size String: enough for the short command lines and query args sketches use.\nclass String {\n  char buf_[128];\n  int len_;\n public:\n  String() : len_(0) { buf_[0] = 0; }\n  String(const char* s) : len_(0) { buf_[0] = 0; append(s); }\n  String(char c) : len_(0) { buf_[0] = 0; *this += c; }\n  String(int v, int base = DEC) : len_(0) { char t[40]; snprintf(t, sizeof(t), base == HEX ? \"%x\" : \"%d\", v); buf_[0] = 0; append(t); }\n  String(unsigned int v, int base = DEC) : len_(0) { char t[40]; snprintf(t, sizeof(t), base == HEX ? \"%x\" : \"%u\", v); buf_[0] = 0; append(t); }\n  String(long v, int base = DEC) : String((int)v, base) {}\n  String(unsigned long v, int base = DEC) : String((unsigned int)v, base) {}\n  String(double v, int digits = 2) : len_(0) {\n    static const char* const F[] = {\"%.0f\", \"%.1f\", \"%.2f\", \"%.3f\", \"%.4f\", \"%.5f\", \"%.6f\"};\n    char t[40]; snprintf(t, sizeof(t), F[digits < 0 ? 0 : digits > 6 ? 6 : digits], v); buf_[0] = 0; append(t);\n  }\n  String& operator=(const char* s) { len_ = 0; buf_[0] = 0; append(s); return *this; }\n  String& operator+=(char c) {\n    if (len_ < (int)sizeof(buf_) - 1) { buf_[len_++] = c; buf_[len_] = 0; }\n    return *this;\n  }\n  String& operator+=(const char* s) { append(s); return *this; }\n  String& operator+=(const String& s) { append(s.c_str()); return *this; }\n  template <class T> String& operator+=(T v) { return *this += String(v); }\n  template <class T> String operator+(const T& v) const { String r(*this); r += v; return r; }\n  void append(const char* s) { while (s && *s) *this += *s++; }\n  unsigned int length() const { return len_; }\n  const char* c_str() const { return buf_; }\n  long toInt() const {\n    const char* p = buf_;\n    while (*p == ' ') p++;\n    bool neg = false;\n    if (*p == '-' || *p == '+') neg = (*p++ == '-');\n    long v = 0;\n    while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');\n    return neg ? -v : v;\n  }\n  bool operator==(const char* s) const { return strcmp(buf_, s) == 0; }\n  bool operator==(const String& s) const { return strcmp(buf_, s.buf_) == 0; }\n  bool operator!=(const char* s) const { return strcmp(buf_, s) != 0; }\n  float toFloat() const {\n    const char* p = buf_;\n    while (*p == ' ') p++;\n    bool neg = false;\n    if (*p == '-' || *p == '+') neg = (*p++ == '-');\n    float v = 0, scale = 1;\n    while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');\n    if (*p == '.') { p++; while (*p >= '0' && *p <= '9') { scale /= 10; v += (*p++ - '0') * scale; } }\n    return neg ? -v : v;\n  }\n  char charAt(unsigned int i) const { return i < (unsigned)len_ ? buf_[i] : 0; }\n  char operator[](unsigned int i) const { return charAt(i); }\n  void trim() {\n    int a = 0;\n    while (a < len_ && (buf_[a] == ' ' || buf_[a] == '\\r' || buf_[a] == '\\n' || buf_[a] == '\\t')) a++;\n    int b = len_;\n    while (b > a && (buf_[b - 1] == ' ' || buf_[b - 1] == '\\r' || buf_[b - 1] == '\\n' || buf_[b - 1] == '\\t')) b--;\n    memcpy(buf_, buf_ + a, b - a); len_ = b - a; buf_[len_] = 0;\n  }\n  bool startsWith(const char* s) const { size_t n = strlen(s); return (size_t)len_ >= n && !memcmp(buf_, s, n); }\n  int indexOf(char c) const { for (int i = 0; i < len_; i++) if (buf_[i] == c) return i; return -1; }\n  String substring(unsigned int from, unsigned int to = 0xffff) const {\n    String r;\n    for (unsigned int i = from; i < to && i < (unsigned)len_; i++) r += buf_[i];\n    return r;\n  }\n};\ninline String operator+(const char* a, const String& b) { String r(a); r += b; return r; }\n\nclass HardwareSerial {\n public:\n  void begin(unsigned long) {}\n  int available() { return hw_serial_available(); }\n  int read() { return hw_serial_read(); }\n  void print(const char* s) { hw_serial_write(s, (int)strlen(s)); }\n  void print(const String& s) { print(s.c_str()); }\n  void print(char c) { hw_serial_write(&c, 1); }\n  void print(int v, int base = DEC) { print(String(v, base)); }\n  void print(unsigned int v, int base = DEC) { print(String(v, base)); }\n  void print(long v, int base = DEC) { print(String(v, base)); }\n  void print(unsigned long v, int base = DEC) { print(String(v, base)); }\n  void print(double v, int digits = 2) { print(String(v, digits)); }\n  void println() { print(\"\\n\"); }\n  template <class T> void println(const T& v) { print(v); print(\"\\n\"); }\n  template <class T> void println(const T& v, int f) { print(v, f); print(\"\\n\"); }\n  String readStringUntil(char end) {\n    String r;\n    uint32_t t0 = millis();\n    while (millis() - t0 < 1000) {\n      int c = read();\n      if (c < 0) { delay(1); continue; }\n      if (c == end) break;\n      r += (char)c;\n    }\n    return r;\n  }\n  operator bool() const { return true; }\n  int printf(const char* fmt, ...) __attribute__((format(printf, 2, 3)));\n};\nextern HardwareSerial Serial;\n\nclass EspClass {\n public:\n  // Fixed, so the simulated hotspot is always \"RC-Car-7E91\".\n  uint64_t getEfuseMac() { return 0x00007E91A2B3C4D5ULL; }\n};\nextern EspClass ESP;\n\n// Declared with C linkage so the sketch's setup()/loop() are exported by name.\nextern \"C\" {\nvoid setup();\nvoid loop();\n}\n","WiFi.h":"// Wi-Fi stand-in: the twin's virtual phone is always \"in range\" unless the\n// user switches its Wi-Fi off in the UI, which JavaScript handles.\n#pragma once\n#include \"Arduino.h\"\n\nextern \"C\" {\nHW_IMPORT(\"wifi_mode\") void hw_wifi_mode(int mode);\nHW_IMPORT(\"wifi_softap\") int hw_wifi_softap(const char* ssid, const char* pass);\nHW_IMPORT(\"wifi_begin\") void hw_wifi_begin(const char* ssid);\n}\n\n#define WIFI_STA 1\n#define WIFI_AP 2\n#define WL_CONNECTED 3\n\nclass IPAddress {\n  uint8_t a_, b_, c_, d_;\n public:\n  IPAddress(uint8_t a, uint8_t b, uint8_t c, uint8_t d) : a_(a), b_(b), c_(c), d_(d) {}\n  String toString() const {\n    char t[16];\n    snprintf(t, sizeof(t), \"%d.%d.%d.%d\", a_, b_, c_, d_);\n    return String(t);\n  }\n};\n\nclass WiFiClass {\n public:\n  void mode(int m) { hw_wifi_mode(m); }\n  bool softAP(const char* ssid, const char* pass) { return hw_wifi_softap(ssid, pass); }\n  void begin(const char* ssid, const char* = \"\", int = 0) { hw_wifi_begin(ssid); }\n  int status() { return WL_CONNECTED; }\n  void setSleep(bool) {}\n  IPAddress softAPIP() { return IPAddress(192, 168, 4, 1); }\n  IPAddress localIP() { return IPAddress(10, 13, 37, 2); }\n};\nextern WiFiClass WiFi;\n","WebServer.h":"// WebServer stand-in: requests come from the twin's virtual phone (JavaScript)\n// and are handled one per handleClient() call, like the real library.\n#pragma once\n#include \"Arduino.h\"\n\nextern \"C\" {\nHW_IMPORT(\"http_poll\") int hw_http_poll(char* path, int path_cap, char* query, int query_cap);\nHW_IMPORT(\"http_respond\") void hw_http_respond(int code, const char* type, const char* body, int len);\nHW_IMPORT(\"http_header\") void hw_http_header(const char* name, const char* value);\n}\n\nclass WebServer {\n public:\n  typedef void (*Handler)();\n  explicit WebServer(int) : count_(0), notFound_(nullptr) {}\n  void on(const char* path, Handler h) {\n    if (count_ < 16) { paths_[count_] = path; handlers_[count_++] = h; }\n  }\n  void onNotFound(Handler h) { notFound_ = h; }\n  void begin() {}\n  void handleClient();\n  String arg(const char* name) const;\n  void send(int code, const char* type, const char* body) {\n    hw_http_respond(code, type, body, (int)strlen(body));\n  }\n  void sendHeader(const char* name, const char* value) { hw_http_header(name, value); }\n private:\n  const char* paths_[16];\n  Handler handlers_[16];\n  int count_;\n  Handler notFound_;\n  char path_[64];\n  char query_[128];\n};\n","Servo.h":"// Servo library stand-in: a 50 Hz PWM signal on the pin (pulse 544-2400 us),\n// which the simulated SG90 servo follows.\n#pragma once\n#include \"Arduino.h\"\n\nclass Servo {\n  int pin_ = -1, min_ = 544, max_ = 2400, us_ = 1500;\n public:\n  uint8_t attach(int pin, int minUs = 544, int maxUs = 2400) {\n    pin_ = pin; min_ = minUs; max_ = maxUs;\n    hw_ledc_attach(pin, 50, 16);\n    writeMicroseconds(us_);\n    return 1;\n  }\n  void detach() { if (pin_ >= 0) hw_ledc_write(pin_, 0); pin_ = -1; }\n  void write(int value) {\n    if (value >= 200) { writeMicroseconds(value); return; }  // like Arduino: big values are microseconds\n    value = constrain(value, 0, 180);\n    writeMicroseconds(min_ + (long)(max_ - min_) * value / 180);\n  }\n  void writeMicroseconds(int us) {\n    us_ = us;\n    if (pin_ >= 0) hw_ledc_write(pin_, (uint32_t)((unsigned long long)us * 65535ULL / 20000ULL));\n  }\n  int read() const { return (int)((long)(us_ - min_) * 180 / (max_ - min_)); }\n  int readMicroseconds() const { return us_; }\n  bool attached() const { return pin_ >= 0; }\n};\n","shim.cpp":"// Runtime pieces of the shim: global objects, WebServer dispatch and a tiny\n// C library (string helpers, printf-style formatting, sscanf for \"%d\").\n#include \"Arduino.h\"\n#include \"WiFi.h\"\n#include \"WebServer.h\"\n\nHardwareSerial Serial;\nEspClass ESP;\nWiFiClass WiFi;\n\nextern \"C\" {\nvoid* memcpy(void* d, const void* s, size_t n) {\n  char* dp = (char*)d; const char* sp = (const char*)s;\n  while (n--) *dp++ = *sp++;\n  return d;\n}\nvoid* memmove(void* d, const void* s, size_t n) {\n  char* dp = (char*)d; const char* sp = (const char*)s;\n  if (dp < sp) { while (n--) *dp++ = *sp++; }\n  else { dp += n; sp += n; while (n--) *--dp = *--sp; }\n  return d;\n}\nvoid* memset(void* d, int c, size_t n) {\n  char* dp = (char*)d;\n  while (n--) *dp++ = (char)c;\n  return d;\n}\nsize_t strlen(const char* s) { size_t n = 0; while (s[n]) n++; return n; }\nint memcmp(const void* a, const void* b, size_t n) {\n  const unsigned char* x = (const unsigned char*)a; const unsigned char* y = (const unsigned char*)b;\n  for (; n; n--, x++, y++) if (*x != *y) return *x - *y;\n  return 0;\n}\nint strcmp(const char* a, const char* b) {\n  while (*a && *a == *b) { a++; b++; }\n  return (unsigned char)*a - (unsigned char)*b;\n}\n\nstruct Out {\n  char* buf; size_t cap; size_t n;\n  void put(char c) { if (n + 1 < cap) buf[n] = c; n++; }\n  void puts(const char* s, int width, bool left, char pad) {\n    int len = (int)strlen(s);\n    if (!left) for (int i = len; i < width; i++) put(pad);\n    while (*s) put(*s++);\n    if (left) for (int i = len; i < width; i++) put(' ');\n  }\n};\n\nstatic void fmtUnsigned(char* t, unsigned long long v, int base, bool upper) {\n  char tmp[24]; int i = 0;\n  const char* digits = upper ? \"0123456789ABCDEF\" : \"0123456789abcdef\";\n  do { tmp[i++] = digits[v % base]; v /= base; } while (v);\n  int j = 0;\n  while (i) t[j++] = tmp[--i];\n  t[j] = 0;\n}\n\nint vsnprintf(char* buf, size_t cap, const char* f, va_list ap) {\n  Out o{buf, cap, 0};\n  for (; *f; f++) {\n    if (*f != '%') { o.put(*f); continue; }\n    f++;\n    bool left = false; char pad = ' ';\n    while (*f == '-' || *f == '0') { if (*f == '-') left = true; else pad = '0'; f++; }\n    int width = 0;\n    while (*f >= '0' && *f <= '9') width = width * 10 + (*f++ - '0');\n    int prec = -1;\n    if (*f == '.') { f++; prec = 0; while (*f >= '0' && *f <= '9') prec = prec * 10 + (*f++ - '0'); }\n    int longs = 0;\n    while (*f == 'l') { longs++; f++; }\n    char t[48];\n    switch (*f) {\n      case 'd': case 'i': {\n        long long v = longs >= 2 ? va_arg(ap, long long) : longs ? va_arg(ap, long) : va_arg(ap, int);\n        char* p = t;\n        if (v < 0) { *p++ = '-'; v = -v; }\n        fmtUnsigned(p, (unsigned long long)v, 10, false);\n        o.puts(t, width, left, pad);\n        break;\n      }\n      case 'u': case 'x': case 'X': {\n        unsigned long long v = longs >= 2 ? va_arg(ap, unsigned long long)\n                             : longs ? va_arg(ap, unsigned long) : va_arg(ap, unsigned int);\n        fmtUnsigned(t, v, *f == 'u' ? 10 : 16, *f == 'X');\n        o.puts(t, width, left, pad);\n        break;\n      }\n      case 'f': {\n        double v = va_arg(ap, double);\n        if (prec < 0) prec = 6;\n        char* p = t;\n        if (v < 0) { *p++ = '-'; v = -v; }\n        double scale = 1;\n        for (int i = 0; i < prec; i++) scale *= 10;\n        unsigned long long whole = (unsigned long long)(v * scale + 0.5);\n        unsigned long long ip = whole / (unsigned long long)scale;\n        unsigned long long fp = whole % (unsigned long long)scale;\n        fmtUnsigned(p, ip, 10, false);\n        if (prec > 0) {\n          p += strlen(p);\n          *p++ = '.';\n          char fr[24]; fmtUnsigned(fr, fp, 10, false);\n          for (int i = (int)strlen(fr); i < prec; i++) *p++ = '0';\n          memcpy(p, fr, strlen(fr) + 1);\n        }\n        o.puts(t, width, left, pad);\n        break;\n      }\n      case 's': o.puts(va_arg(ap, const char*), width, left, ' '); break;\n      case 'c': o.put((char)va_arg(ap, int)); break;\n      case '%': o.put('%'); break;\n      default: o.put('%'); o.put(*f); break;\n    }\n  }\n  if (cap) buf[o.n < cap ? o.n : cap - 1] = 0;\n  return (int)o.n;\n}\n\nint snprintf(char* buf, size_t cap, const char* fmt, ...) {\n  va_list ap; va_start(ap, fmt);\n  int n = vsnprintf(buf, cap, fmt, ap);\n  va_end(ap);\n  return n;\n}\n\n// Supports literal characters, whitespace and %d, which is what sketches here use.\nint sscanf(const char* s, const char* f, ...) {\n  va_list ap; va_start(ap, f);\n  int got = 0;\n  for (; *f; f++) {\n    if (*f == ' ') { while (*s == ' ' || *s == '\\t') s++; continue; }\n    if (*f == '%' && f[1] == 'd') {\n      f++;\n      while (*s == ' ') s++;\n      bool neg = false;\n      if (*s == '-' || *s == '+') neg = (*s++ == '-');\n      if (*s < '0' || *s > '9') break;\n      int v = 0;\n      while (*s >= '0' && *s <= '9') v = v * 10 + (*s++ - '0');\n      *va_arg(ap, int*) = neg ? -v : v;\n      got++;\n      continue;\n    }\n    if (*s != *f) break;\n    s++;\n  }\n  va_end(ap);\n  return got;\n}\n}  // extern \"C\"\n\nint HardwareSerial::printf(const char* fmt, ...) {\n  char t[256];\n  va_list ap; va_start(ap, fmt);\n  int n = vsnprintf(t, sizeof(t), fmt, ap);\n  va_end(ap);\n  hw_serial_write(t, n < (int)sizeof(t) ? n : (int)sizeof(t) - 1);\n  return n;\n}\n\nvoid WebServer::handleClient() {\n  if (!hw_http_poll(path_, sizeof(path_), query_, sizeof(query_))) return;\n  for (int i = 0; i < count_; i++) {\n    if (strcmp(paths_[i], path_) == 0) { handlers_[i](); return; }\n  }\n  if (notFound_) notFound_();\n}\n\nString WebServer::arg(const char* name) const {\n  String out;\n  size_t nlen = strlen(name);\n  const char* p = query_;\n  while (*p) {\n    const char* key = p;\n    while (*p && *p != '=' && *p != '&') p++;\n    bool match = (size_t)(p - key) == nlen && !memcmp(key, name, nlen);\n    if (*p == '=') p++;\n    while (*p && *p != '&') { if (match) out += *p; p++; }\n    if (match) return out;\n    if (*p == '&') p++;\n  }\n  return out;\n}\n"};
 const __m = {};
 __m['boards'] = (() => {
-// Programmable boards (ESP32 DevKit V1, Arduino Uno): power, GPIO drivers,
-// and the firmware host that runs a compiled sketch against the circuit.
+// Programmable boards (ESP32 DevKit V1, ESP32 38-pin DevKit, the 38-pin board
+// on its expansion shield, Arduino Uno): power, GPIO drivers, and the
+// firmware host that runs a compiled sketch against the circuit.
 
 const ESP32_PINS = ['VIN', 'GND.2', 'D13', 'D12', 'D14', 'D27', 'D26', 'D25', 'D33', 'D32', 'D35', 'D34', 'VN', 'VP', 'EN',
   '3V3', 'GND.1', 'D15', 'D2', 'D4', 'RX2', 'TX2', 'D5', 'D18', 'D19', 'D21', 'RX0', 'TX0', 'D22', 'D23'];
+// 38-pin ESP32 DevKit (DevKitC layout, USB Type-C), antenna at the top.
+// Pins are named as printed on the board: the GPIO number alone.
+const ESP32_38_LEFT = ['3V3', 'EN', 'VP', 'VN', '34', '35', '32', '33', '25', '26', '27', '14', '12', 'GND.1', '13', 'SD2', 'SD3', 'CMD', '5V'];
+const ESP32_38_RIGHT = ['GND.2', '23', '22', 'TX', 'RX', '21', 'GND.3', '19', '18', '5', '17', '16', '4', '0', '2', '15', 'SD1', 'SD0', 'CLK'];
+const gpio38 = (pin) => (/^\d+$/.test(pin) ? Number(pin) : { TX: 1, RX: 3, VP: 36, VN: 39 }[pin] ?? null);
+// The expansion shield gives every GPIO a row of three pins: G (ground),
+// V (5 V, or 3.3 V with the jumper) and S (the signal, the GPIO itself).
+const SHIELD_ROWS = [...ESP32_38_LEFT, ...ESP32_38_RIGHT].filter((p) => gpio38(p) !== null);
+const SHIELD_EXTRA = ['DC+', 'DC-', '3V3.2', '5V.2', 'GND.4', 'GND.5'];
 const UNO_PINS = ['A5.2', 'A4.2', 'AREF', 'GND.1', '13', '12', '11', '10', '9', '8', '7', '6', '5', '4', '3', '2', '1', '0',
   'IOREF', 'RESET', '3.3V', '5V', 'GND.2', 'GND.3', 'VIN', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
 
@@ -7247,6 +7257,25 @@ const PROFILES = {
   },
 };
 
+const ESP32_38 = {
+  ...PROFILES.esp32,
+  name: 'ESP32 DevKit 38-pin (Type-C)',
+  pins: [...ESP32_38_LEFT, ...ESP32_38_RIGHT],
+  gnds: ['GND.1', 'GND.2', 'GND.3'],
+  usbPin: '5V',
+  reg: { in: '5V', out: '3V3', v: 3.3, dropout: 1.1, minIn: 3.5 },
+  gpioOf: gpio38,
+};
+PROFILES.esp32_38 = ESP32_38;
+PROFILES.esp32_shield = {
+  ...ESP32_38,
+  name: 'ESP32 38-pin on expansion shield',
+  pins: [...ESP32_38.pins, ...SHIELD_ROWS.flatMap((p) => [`V.${p}`, `G.${p}`]), ...SHIELD_EXTRA],
+  gnds: ['GND.1', 'GND.2', 'GND.3', 'GND.4', 'GND.5', 'DC-', ...SHIELD_ROWS.map((p) => `G.${p}`)],
+  // The barrel jack feeds the shield's own 5 V regulator (AMS1117-5.0).
+  jack: { in: 'DC+', out: '5V', v: 5.0, dropout: 1.1, max: 12 },
+};
+
 function adcMv(v) {
   let mv = v * 1000;
   if (mv > 2450) mv = 2450 + (mv - 2450) * 0.55;
@@ -7271,6 +7300,27 @@ function boardParts() {
       bom: { label: 'ESP32 DevKit V1 (30-pin, WROOM-32)', search: 'ESP32 DevKit V1 30 pin WROOM-32', inr: [400, 550] },
       sketches: SKETCHES.concat([{ id: 'rc_car', label: 'RC car v1 (Wi-Fi joystick)' }]),
     }),
+    'bench-esp32-38': board('esp32', {
+      cat: 'Boards', name: 'ESP32 DevKit 38-pin (Type-C)', draw: 'esp32_38',
+      bom: { label: 'ESP32 38-pin DevKit (USB Type-C, WROOM-32)', search: 'ESP32 38 pin development board type C WROOM-32', inr: [450, 650] },
+      sketches: SKETCHES.concat([{ id: 'rc_car', label: 'RC car v1 (Wi-Fi joystick)' }]),
+      wokwi: { type: 'board-esp32-devkit-c-v4', pin: (p) => p.replace(/^SD/, 'D') },
+    }, ESP32_38),
+    'bench-esp32-shield': board('esp32', {
+      cat: 'Boards', name: 'ESP32 38-pin on expansion shield', draw: 'esp32_shield', leftPinsX: 60,
+      bom: { label: 'ESP32 38-pin Type-C board + ESP32 expansion shield (G/V/S pins, DC jack)', search: 'ESP32 38 pin expansion board shield type C', inr: [650, 950] },
+      sketches: SKETCHES.concat([{ id: 'rc_car', label: 'RC car v1 (Wi-Fi joystick)' }]),
+      props: { vsel: { label: 'V pins give', type: 'select', options: [['5V', '5 V'], ['3V3', '3.3 V']], default: '5V' } },
+      internal: (props) => {
+        const v = SHIELD_ROWS.map((p) => `V.${p}`);
+        const three = props.vsel === '3V3';
+        return [['5V', '5V.2', ...(three ? [] : v)], ['3V3', '3V3.2', ...(three ? v : [])]];
+      },
+      wokwi: {
+        type: 'board-esp32-devkit-c-v4',
+        pin: (p, props) => (/^G\./.test(p) || /^GND\.[45]$/.test(p) ? 'GND.1' : /^V\./.test(p) ? (props.vsel === '3V3' ? '3V3' : '5V') : /^(3V3|5V)\.2$/.test(p) ? p.slice(0, -2) : /^DC/.test(p) ? null : p.replace(/^SD/, 'D')),
+      },
+    }, PROFILES.esp32_shield),
     'wokwi-arduino-uno': board('uno', {
       cat: 'Boards', name: 'Arduino Uno', el: 'wokwi-arduino-uno',
       bom: { label: 'Arduino Uno R3 (compatible, with USB cable)', search: 'Arduino Uno R3 compatible board with cable', inr: [450, 800] },
@@ -7279,18 +7329,18 @@ function boardParts() {
   };
 }
 
-function board(kind, meta) {
-  const P = PROFILES[kind];
+function board(kind, meta, P = PROFILES[kind]) {
   const gpioPins = P.pins.filter((p) => P.gpioOf(p) !== null);
   const pinOfGpio = new Map(gpioPins.map((p) => [P.gpioOf(p), p]));
   return {
     ...meta,
     mcu: P,
     pins: () => P.pins,
-    internal: () => [P.gnds, ...(kind === 'uno' ? [['A4', 'A4.2'], ['A5', 'A5.2']] : [])],
+    internal: (props) => [P.gnds, ...(kind === 'uno' ? [['A4', 'A4.2'], ['A5', 'A5.2']] : []), ...(meta.internal ? meta.internal(props || {}) : [])],
     props: {
       firmware: { label: 'Firmware', type: 'select', options: meta.sketches.map((s) => [s.id, s.label]), default: '' },
       usb: { label: 'USB cable plugged in', type: 'bool', default: true },
+      ...(meta.props || {}),
     },
     init(c) {
       c.s.state = 'off';
@@ -7308,6 +7358,14 @@ function board(kind, meta) {
       if (regV > 0.5 && s.regOn !== false) {
         c.V(P.reg.out, P.gnd, regV, 0.05);
         c.I(P.reg.in, P.gnd, Math.max(0, s.regA || 0));
+      }
+      if (P.jack) {
+        const jv = Math.min(P.jack.v, c.vraw(P.jack.in) - c.vraw(P.gnd) - P.jack.dropout);
+        s.jackV = jv;
+        if (jv > 0.5 && s.jackOn !== false) {
+          c.V(P.jack.out, P.gnd, jv, 0.05);
+          c.I(P.jack.in, P.gnd, Math.max(0, s.jackA || 0));
+        }
       }
       if (P.ldo33) {
         const v5 = c.vraw('5V');
@@ -7347,6 +7405,15 @@ function board(kind, meta) {
         if (iout < -0.01) { s.regOn = false; changed = true; }
         else if (Math.abs(iout - (s.regA || 0)) > 0.002 + 0.02 * Math.abs(iout)) { s.regA = iout; changed = true; }
       } else if (!regOn && vout < s.regV - 0.05) { s.regOn = true; changed = true; }
+      if (P.jack) {
+        const jout = c.vraw(P.jack.out) - c.vraw(P.gnd);
+        const on = s.jackOn !== false;
+        if (on && s.jackV > 0.5) {
+          const i = (s.jackV - jout) / 0.05;
+          if (i < -0.01) { s.jackOn = false; changed = true; }
+          else if (Math.abs(i - (s.jackA || 0)) > 0.002 + 0.02 * Math.abs(i)) { s.jackA = i; changed = true; }
+        } else if (!on && jout < s.jackV - 0.05) { s.jackOn = true; changed = true; }
+      }
       return changed;
     },
     step(c) {
@@ -7377,7 +7444,13 @@ function board(kind, meta) {
     check(c) {
       const vin = c.vd(P.reg.in, P.gnd);
       if (vin > P.vinMax) c.issue('fail', `${P.reg.in} is ${vin.toFixed(1)} V, above the board's ${P.vinMax} V limit`, 'Use a regulator (buck converter) to bring it down.');
-      else if (kind === 'esp32' && vin > P.vinWarn) c.issue('warn', `VIN is ${vin.toFixed(1)} V: the on-board regulator runs hot above ~6 V`, 'Feed VIN with 5 V.');
+      else if (kind === 'esp32' && vin > P.vinWarn) c.issue('warn', `${P.reg.in} is ${vin.toFixed(1)} V: the on-board regulator runs hot above ~6 V`, `Feed ${P.reg.in} with 5 V.`);
+      if (P.jack && c.connected(P.jack.in)) {
+        const dc = c.vd(P.jack.in, P.gnd);
+        if (dc > P.jack.max + 0.05) c.issue('fail', `The DC jack gets ${dc.toFixed(1)} V, above the shield's ${P.jack.max} V limit`, 'Use a 7–12 V adapter or battery pack.');
+        else if (dc < -0.3) c.issue('fail', `The DC jack is wired backwards (${dc.toFixed(1)} V)`, 'Battery + goes to DC+ (the centre pin), − to DC−.');
+        else if (dc > 1 && dc < P.jack.v + P.jack.dropout - 0.05) c.issue('warn', `The DC jack gets only ${dc.toFixed(1)} V, so the shield's 5 V pins sag to about ${Math.max(0, dc - P.jack.dropout).toFixed(1)} V`, 'Its 5 V regulator needs about 6.5 V or more in: use a 7–12 V supply (or power from USB-C).');
+      }
       const rail = c.vd(P.rail, P.gnd);
       for (const pin of gpioPins) {
         if (!c.connected(pin)) continue;
@@ -7400,6 +7473,7 @@ function board(kind, meta) {
         ['State', s.state === 'run' ? `running ${c.p.firmware || '(no firmware)'}` : s.state],
         [P.rail, fmt(c.vd(P.rail, P.gnd), 'V')],
         [P.reg.in, fmt(c.vd(P.reg.in, P.gnd), 'V')],
+        ...(P.jack ? [['DC jack', fmt(c.vd(P.jack.in, P.gnd), 'V')]] : []),
       ];
       for (const [g, st] of [...s.pins].sort((a, b) => a[0] - b[0])) {
         const pin = pinOfGpio.get(g) || `GPIO${g}`;
@@ -7430,7 +7504,7 @@ function startFirmware(c, P, pinOfGpio) {
   s.ap = null;
   s.inst = null;
   s.state = 'run';
-  const kind = P === PROFILES.uno ? 'uno' : 'esp32';
+  const kind = P === PROFILES.uno ? 'uno' : 'esp32';  // same firmware for every ESP32 board
   const mod = c.p.firmware ? sim.firmware[`${c.p.firmware}.${kind}`] || sim.firmware[c.p.firmware] : null;
   if (!mod) return;
   const mem = () => new Uint8Array(s.inst.exports.memory.buffer);
@@ -7542,7 +7616,7 @@ function startFirmware(c, P, pinOfGpio) {
   }
 }
 
-return { boardParts };
+return { ESP32_38_LEFT, ESP32_38_RIGHT, SHIELD_ROWS, boardParts };
 })();
 __m['breadboard'] = (() => {
 // Solderless breadboards drawn like the real thing: holes 0.1" (9.6 px) apart,
@@ -8830,6 +8904,8 @@ __m['draw'] = (() => {
 // Each entry gives a size, pin positions in px (same units as Wokwi's
 // pinInfo) and an SVG body that can react to the part's live visual state.
 
+const { ESP32_38_LEFT, ESP32_38_RIGHT, SHIELD_ROWS } = __m['boards'];
+
 const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
 // A module board with header pins on its left / right / bottom edges.
@@ -8890,7 +8966,96 @@ const batteryPack = (cells, label) => {
   };
 };
 
+// 38-pin ESP32 DevKit (Type-C), antenna up. Pins 0.1" apart, rows 1" apart.
+const E38 = { w: 112, h: 232, xl: 8, xr: 104, y0: 30, pitch: 9.6 };
+const pinLabel = (p) => p.replace(/\.\d$/, '');
+function esp32Board(vis) {
+  const { w, xl, xr, y0, pitch } = E38;
+  const pins = {};
+  ESP32_38_LEFT.forEach((p, i) => { pins[p] = [xl, y0 + i * pitch]; });
+  ESP32_38_RIGHT.forEach((p, i) => { pins[p] = [xr, y0 + i * pitch]; });
+  const on = !!vis?.ledPower;
+  const blue = !!vis?.led1;
+  const svg = `
+    <rect x="0" y="0" width="${w}" height="224" rx="4" fill="#1e2228" stroke="#000"/>
+    <rect x="27" y="-2" width="58" height="122" rx="2" fill="#2b2f36" stroke="#111"/>
+    <path d="M32 3h48v5H35v4h45v5H32" fill="none" stroke="#c9a227" stroke-width="2"/>
+    <rect x="30" y="24" width="52" height="92" rx="2" fill="#c7cbd1" stroke="#8b9097"/>
+    <text x="56" y="56" font-size="5.2" font-weight="700" text-anchor="middle" fill="#333">ESP32-WROOM-32</text>
+    <text x="56" y="65" font-size="4.4" text-anchor="middle" fill="#555">ESP32-D0WD-V3</text>
+    <text x="56" y="100" font-size="9" text-anchor="middle" fill="#888">≋ Wi-Fi</text>
+    <rect x="44" y="136" width="24" height="24" rx="1.5" fill="#111"/><text x="56" y="150" font-size="4.6" text-anchor="middle" fill="#aaa">CH340</text>
+    <rect x="34" y="170" width="6" height="4" rx="1" fill="${on ? '#ff3b30' : '#5a1f1f'}"/>${on ? '<circle cx="37" cy="172" r="5" fill="#ff3b3055"/>' : ''}
+    <rect x="72" y="170" width="6" height="4" rx="1" fill="${blue ? '#3aa0ff' : '#1d3550'}"/>${blue ? '<circle cx="75" cy="172" r="6" fill="#3aa0ff66"/>' : ''}
+    <text x="37" y="182" font-size="4.4" text-anchor="middle" fill="#9aa">PWR</text><text x="75" y="182" font-size="4.4" text-anchor="middle" fill="#9aa">IO2</text>
+    <rect x="31" y="199" width="11" height="8" rx="1.5" fill="#ddd"/><circle cx="36.5" cy="203" r="2.3" fill="#333"/><text x="35" y="216" font-size="4.4" text-anchor="middle" fill="#9aa">EN</text>
+    <rect x="70" y="199" width="11" height="8" rx="1.5" fill="#ddd"/><circle cx="75.5" cy="203" r="2.3" fill="#333"/><text x="77" y="216" font-size="4.4" text-anchor="middle" fill="#9aa">BOOT</text>
+    <rect x="42" y="212" width="28" height="18" rx="5" fill="#b8bcc2" stroke="#6e737a"/><rect x="47" y="219" width="18" height="4" rx="2" fill="#3a3e44"/>
+    <text x="56" y="208" font-size="4.6" text-anchor="middle" fill="#9aa">USB-C</text>
+    <g fill="#e6e6e6" font-size="5.6">${ESP32_38_LEFT.map((p, i) => `<text x="${xl + 5}" y="${y0 + i * pitch + 2}">${esc(pinLabel(p))}</text>`).join('')}
+    ${ESP32_38_RIGHT.map((p, i) => `<text x="${xr - 5}" y="${y0 + i * pitch + 2}" text-anchor="end">${esc(pinLabel(p))}</text>`).join('')}</g>
+    ${Object.values(pins).map(([x, y]) => `<rect x="${x - 3.2}" y="${y - 3.2}" width="6.4" height="6.4" fill="#222"/><circle cx="${x}" cy="${y}" r="2.2" fill="#d9b44a" stroke="#6b5517" stroke-width=".6"/>`).join('')}`;
+  return { pins, svg };
+}
+
+// The 38-pin board seated on its expansion shield: a G / V / S row for every
+// GPIO beside the board, a barrel jack (DC in) and a power header.
+const SH = { w: 216, h: 300, x1: 62, py0: 44 };
+function esp32Shield(p, vis) {
+  const { w, h, x1, py0 } = SH;
+  const x2 = x1 + E38.xr - E38.xl;
+  const ox = x1 - E38.xl;
+  const oy = py0 - E38.y0;
+  const b = esp32Board(vis);
+  const pins = {};
+  for (const [n, [x, y]] of Object.entries(b.pins)) pins[n] = [x + ox, y + oy];
+  const rowsSvg = [];
+  for (const [side, list] of [[-1, ESP32_38_LEFT], [1, ESP32_38_RIGHT]]) {
+    list.forEach((n, i) => {
+      const y = py0 + i * E38.pitch;
+      const sx = (side < 0 ? x1 : x2) + side * 14.4;
+      if (SHIELD_ROWS.includes(n)) {
+        pins[`V.${n}`] = [sx + side * 9.6, y];
+        pins[`G.${n}`] = [sx + side * 19.2, y];
+        rowsSvg.push(`<text x="${sx + side * 25}" y="${y + 2}" font-size="5.6" ${side < 0 ? 'text-anchor="end"' : ''} fill="#fff">${esc(pinLabel(n))}</text>`);
+      }
+      // The S pin is the GPIO itself (same net as the board pin above it).
+      pins[n] = [sx, y];
+    });
+  }
+  pins['DC+'] = [2, 262];
+  pins['DC-'] = [2, 281];
+  ['3V3.2', '5V.2', 'GND.4', 'GND.5'].forEach((n, i) => { pins[n] = [150 + i * 12, h - 8]; });
+  const vLabel = p.vsel === '3V3' ? '3V3' : '5V';
+  const on = !!vis?.ledPower;
+  const svg = `
+    <rect x="1" y="1" width="${w - 2}" height="${h - 2}" rx="6" fill="#1b5e9b" stroke="#0d3a63"/>
+    <text x="${w / 2}" y="10" font-size="6.4" font-weight="700" text-anchor="middle" fill="#fff">ESP32 EXPANSION BOARD</text>
+    <g font-size="5.6" font-weight="700" fill="#fff" text-anchor="middle">
+      <text x="${x1 - 33.6}" y="36">G</text><text x="${x1 - 24}" y="36">V</text><text x="${x1 - 14.4}" y="36">S</text>
+      <text x="${x2 + 14.4}" y="36">S</text><text x="${x2 + 24}" y="36">V</text><text x="${x2 + 33.6}" y="36">G</text></g>
+    <rect x="${x1 - 4.8}" y="${py0 - 5}" width="9.6" height="${18 * 9.6 + 10}" fill="#111"/>
+    <rect x="${x2 - 4.8}" y="${py0 - 5}" width="9.6" height="${18 * 9.6 + 10}" fill="#111"/>
+    ${rowsSvg.join('')}
+    <g transform="translate(${ox} ${oy})">${b.svg}</g>
+    <rect x="6" y="250" width="34" height="42" rx="3" fill="#111" stroke="#000"/><circle cx="23" cy="271" r="10" fill="#222" stroke="#555"/><circle cx="23" cy="271" r="3" fill="#bbb"/>
+    <path d="M2 262h6M2 281h6" stroke="#888" stroke-width="2"/>
+    <text x="23" y="248" font-size="5.6" text-anchor="middle" fill="#fff">DC 5–12V</text>
+    <text x="10" y="259" font-size="5" fill="#f88">+</text><text x="10" y="289" font-size="5" fill="#ccc">−</text>
+    <rect x="52" y="262" width="22" height="14" rx="1" fill="#222"/><rect x="55" y="256" width="16" height="6" fill="#999"/><text x="63" y="284" font-size="4.6" text-anchor="middle" fill="#cde">AMS1117-5</text>
+    <rect x="88" y="266" width="6" height="4" rx="1" fill="${on ? '#ff3b30' : '#5a1f1f'}"/><text x="91" y="278" font-size="4.4" text-anchor="middle" fill="#cde">PWR</text>
+    <text x="${w / 2 + 2}" y="${h - 40}" font-size="5.4" text-anchor="middle" fill="#cde">V pins = ${vLabel}</text>
+    <g font-size="5" fill="#fff" text-anchor="middle"><text x="150" y="${h - 15}">3V3</text><text x="162" y="${h - 15}">5V</text><text x="174" y="${h - 15}">GND</text><text x="186" y="${h - 15}">GND</text></g>
+    ${Object.entries(pins).map(([n, [x, y]]) => {
+      const col = /^G\.|^GND/.test(n) ? '#222' : /^V\.|^5V|^3V3/.test(n) ? '#c33' : '#e2b93b';
+      return `<rect x="${x - 3.6}" y="${y - 3.6}" width="7.2" height="7.2" fill="#0b0b0b"/><circle cx="${x}" cy="${y}" r="2.3" fill="#d9b44a" stroke="${col}" stroke-width="1.1"/>`;
+    }).join('')}`;
+  return { w, h, pins, svg };
+}
+
 const DRAW = {
+  esp32_38: () => ({ w: E38.w, h: E38.h, pins: esp32Board(null).pins, svg: (p, vis) => esp32Board(vis).svg }),
+  esp32_shield: (p) => { const d = esp32Shield(p || {}, null); return { ...d, svg: (pp, vis) => esp32Shield(pp, vis).svg }; },
   battery: (p, def) => batteryPack(def?.name?.startsWith('4') ? 4 : 2, def?.name?.startsWith('4') ? '4×AA' : '2×18650'),
   battery9: () => ({
     w: 70, h: 46, pins: { '-': [2, 23], '+': [68, 23] },
@@ -9246,7 +9411,12 @@ const BB = {
   },
   'servo-sweep': {
     tip: 'On the breadboard: the board feeds the bottom rails, the servo takes power from them, and its signal goes through column 35 (f–j) to the board pin.',
-    pins: { esp32: { V: 'VIN', SIG: 'D18', GND: 'GND.1' }, uno: { V: '5V', SIG: '9', GND: 'GND.2' } },
+    pins: { esp32: { V: 'VIN', SIG: 'D18', GND: 'GND.1' }, uno: { V: '5V', SIG: '9', GND: 'GND.2' }, esp32s: { V: 'V.18', SIG: '18', GND: 'G.18' } },
+    esp32sTip: 'On the shield no breadboard is needed: the servo\'s 3-wire plug goes straight onto the 18 row, brown on G, red on V (5 V) and orange on S.',
+    esp32s: {
+      parts: [['sv1', 'wokwi-servo', {}, null, 0, [60, 250]]],
+      wires: [['$SIG', 'sv1.PWM', 'orange'], ['$V', 'sv1.V+', 'red'], ['$GND', 'sv1.GND', 'black']],
+    },
     any: {
       parts: [['sv1', 'wokwi-servo', {}, null, 0, [430, 250]]],
       wires: [['$V', 'bp.1', 'red'], ['$GND', 'bn.1', 'black'], ['sv1.V+', `bp.${railN(43)}`, 'red'], ['sv1.GND', `bn.${railN(45)}`, 'black'], ['sv1.PWM', '35b.j', 'orange'], ['$SIG', '35b.f', 'orange']],
@@ -9264,14 +9434,50 @@ const BB = {
     }),
   },
 };
-const BOARD_SPOT = { esp32: ['esp', 'wokwi-esp32-devkit-v1', -165, 8], uno: ['uno', 'wokwi-arduino-uno', -330, 4] };
+const BOARD_SPOT = { esp32: ['esp', 'wokwi-esp32-devkit-v1', -165, 8], esp32s: ['esp', 'bench-esp32-shield', -250, -45], uno: ['uno', 'wokwi-arduino-uno', -330, 4] };
+
+// ---------- the ESP32 examples on the 38-pin board + expansion shield ----------
+// Same sketch and same GPIOs as the 30-pin ESP32; only the pin names change
+// (the 38-pin board prints the number alone: D25 → 25, VIN → 5V).
+const PIN_38 = { VIN: '5V', TX0: 'TX', RX0: 'RX', RX2: '16', TX2: '17' };
+const pinOn38 = (pin) => PIN_38[pin] || pin.replace(/^D(\d+)$/, '$1');
+const SHIELD_W = 216;
+const OLD_ESP_W = 108;
+// The plain-wires ESP32 layout moved onto the shield. A part wired to a GPIO
+// takes its ground (and 5 V) from the G and V pins of that GPIO's row, the
+// way a 3-wire sensor or servo cable plugs in; the rest use the board's pins.
+function onShield(ex) {
+  const esp = ex.parts.find((p) => p.type === 'wokwi-esp32-devkit-v1');
+  if (!esp) return ex;
+  const others = ex.parts.filter((p) => p !== esp);
+  const leftOfParts = others.reduce((a, p) => a + p.x, 0) / Math.max(1, others.length) > esp.x;
+  const parts = ex.parts.map((p) => (p === esp ? { ...p, type: 'bench-esp32-shield', x: leftOfParts ? esp.x + OLD_ESP_W - SHIELD_W - 30 : esp.x, y: esp.y - 40 } : p));
+  const rowOf = new Map();
+  for (const w of ex.wires) {
+    const [mine, other] = w.a.part === esp.id ? [w.a, w.b] : w.b.part === esp.id ? [w.b, w.a] : [];
+    if (!mine) continue;
+    const pin = pinOn38(mine.pin);
+    if (/^\d+$/.test(pin) && !rowOf.has(other.part)) rowOf.set(other.part, pin);
+  }
+  const wires = ex.wires.map((w) => {
+    if (w.a.part !== esp.id && w.b.part !== esp.id) return w;
+    const [mine, other] = w.a.part === esp.id ? [w.a, w.b] : [w.b, w.a];
+    const row = rowOf.get(other.part);
+    let pin = pinOn38(mine.pin);
+    if (row && /^GND/.test(pin)) pin = `G.${row}`;
+    else if (row && pin === '5V') pin = `V.${row}`;
+    else if (/^GND/.test(pin)) pin = leftOfParts ? 'GND.3' : 'GND.1'; // the GND on the side facing the part
+    return { ...w, a: { part: esp.id, pin }, b: other, pts: [], route: 'board' };
+  });
+  return { ...ex, parts, wires };
+}
 
 const hasBreadboard = (id) => !!BB[id];
 // The breadboard version of an example for one board.
 function onBreadboard(id, board, base) {
   const spec = BB[id];
-  const layout = spec[board] || spec.any;
-  const pins = spec.pins?.[board] || {};
+  const layout = spec[board] || (board === 'esp32s' && spec.esp32) || spec.any;
+  const pins = spec.pins?.[board] || (board === 'esp32s' ? Object.fromEntries(Object.entries(spec.pins?.esp32 || {}).map(([k, v]) => [k, pinOn38(v)])) : {});
   const parts = [P('bb1', 'wokwi-breadboard', 0, 0)];
   if (spec.pins) {
     const [bid, type, x, y] = BOARD_SPOT[board];
@@ -9293,14 +9499,16 @@ function onBreadboard(id, board, base) {
   // Wires from the board ask the app to route around it when the pin faces away.
   const wires = layout.wires.map(([a, b, color]) => (b.startsWith('$') ? [b, a, color] : [a, b, color]))
     .map(([a, b, color]) => ({ a: end(a), b: end(b), color, pts: [], ...(a.startsWith('$') ? { route: 'board' } : {}) }));
-  return { parts, wires, learn: `${base.learn || ''} ${spec.tip}`.trim(), layout: 'bb' };
+  const tip = (board === 'esp32s' && spec.esp32sTip) || spec.tip;
+  return { parts, wires, learn: `${base.learn || ''} ${tip}`.trim(), layout: 'bb' };
 }
 
 // Boards an example can run on. Examples with `boards` have one layout per
 // board (the sketch picks its pins with #ifdef BOARD_UNO); the rest have one.
-const BOARD_NAMES = { esp32: 'ESP32', uno: 'Arduino Uno' };
-const BOARD_TYPES = { 'wokwi-esp32-devkit-v1': 'esp32', 'wokwi-arduino-uno': 'uno' };
-const exampleBoards = (ex) => (ex?.boards ? Object.keys(ex.boards) : []);
+// 'esp32s' is the 38-pin ESP32 on its expansion shield, made from the ESP32 layout.
+const BOARD_NAMES = { esp32: 'ESP32', esp32s: 'ESP32 + shield', uno: 'Arduino Uno' };
+const BOARD_TYPES = { 'wokwi-esp32-devkit-v1': 'esp32', 'bench-esp32-shield': 'esp32s', 'wokwi-arduino-uno': 'uno' };
+const exampleBoards = (ex) => (ex?.boards ? Object.keys(BOARD_NAMES).filter((b) => ex.boards[b] || (b === 'esp32s' && ex.boards.esp32)) : []);
 // The board an example (or one of its variants) is laid out for, if any.
 const boardOfExample = (ex) => ex?.board || BOARD_TYPES[ex?.parts?.find((p) => BOARD_TYPES[p.type])?.type];
 // One example ready to load: its layout for `board` (falls back to ESP32,
@@ -9312,9 +9520,13 @@ function exampleFor(id, board, layout = 'wires') {
   let out;
   if (!ex.boards) out = { ...ex, board: boardOfExample(ex) };
   else {
-    const b = ex.boards[board] ? board : ex.boards.esp32 ? 'esp32' : Object.keys(ex.boards)[0];
+    const b = exampleBoards(ex).includes(board) ? board : ex.boards.esp32 ? 'esp32' : Object.keys(ex.boards)[0];
     const { boards, ...base } = ex;
-    out = { ...base, ...ex.boards[b], board: b, name: `${ex.name} (${BOARD_NAMES[b]})` };
+    out = { ...base, ...(b === 'esp32s' ? onShield(ex.boards.esp32) : ex.boards[b]), board: b, name: `${ex.name} (${BOARD_NAMES[b]})` };
+    if (b === 'esp32s') {
+      const n = (t) => t && t.replace(/\bD(\d+)\b/g, 'GPIO$1').replace(/\bVIN\b/g, '5V');
+      out = { ...out, learn: n(out.learn), run: n(out.run), note: n(out.note), next: (out.next || []).map(n) };
+    }
   }
   if (layout === 'bb' && BB[id]) {
     out = { ...out, ...onBreadboard(id, out.board, out), name: `${out.name} on a breadboard` };
@@ -9322,7 +9534,7 @@ function exampleFor(id, board, layout = 'wires') {
   return out;
 }
 
-return { EXAMPLES, hasBreadboard, BOARD_NAMES, exampleBoards, boardOfExample, exampleFor };
+return { EXAMPLES, pinOn38, hasBreadboard, BOARD_NAMES, exampleBoards, boardOfExample, exampleFor };
 })();
 __m['info'] = (() => {
 // Plain-language details for each part: what it does, what each pin is
@@ -9344,6 +9556,15 @@ const PART_INFO = {
   'wokwi-esp32-devkit-v1': {
     about: 'A small computer (microcontroller) with Wi-Fi and Bluetooth. It runs your Arduino sketch and works at 3.3 V: its pins give 3.3 V and must never receive more.',
     tips: ['Power it from USB, or 5–12 V into VIN.', 'D34, D35, VP (36) and VN (39) are input-only.', 'Analog pins on ADC2 (D2, D4, D12–D15, D25–D27) stop working while Wi-Fi is on; use D32–D39 for sensors.', 'Each pin can give about 20 mA safely: always use a resistor with an LED.'],
+  },
+  'bench-esp32-38': {
+    about: 'The 38-pin ESP32 DevKit with a USB Type-C socket (ESP32-WROOM-32, chip ESP32-D0WD-V3). Same chip and same code as the 30-pin DevKit V1, with a few more pins. The pins are printed with their GPIO number (25 means GPIO25), and it works at 3.3 V: its pins must never receive more.',
+    tips: ['Power it from USB-C, or 5 V into the 5V pin.', '34, 35, VP (36) and VN (39) are input-only.', 'Analog pins on ADC2 (0, 2, 4, 12–15, 25–27) stop working while Wi-Fi is on; use 32–39 for sensors.', 'SD0–SD3, CMD and CLK are wired to the flash memory inside the module: leave them alone.', 'Its rows are 1" apart, too wide for one breadboard: that is what the expansion shield is for.'],
+  },
+  'bench-esp32-shield': {
+    about: 'The 38-pin ESP32 seated on its expansion shield. Every GPIO gets a row of three pins: S is the signal (the GPIO itself), V is 5 V (or 3.3 V, set by the jumper) and G is ground. A sensor or servo with a 3-wire cable plugs straight into one row. The barrel jack powers everything through the shield\'s 5 V regulator.',
+    tips: ['A servo plugs straight into a row: brown to G, red to V, orange to S.', 'Wire by the number printed beside the row (25 = GPIO25), not by its position.', 'V pins are 5 V by default: never feed 5 V back into an S pin. Sensors with a 5 V output (HC-SR04 ECHO) still need a divider.', 'DC jack: about 7–12 V gives a solid 5 V. Below ~6.5 V the 5 V pins sag; USB-C works too.'],
+    pins: { 'DC+': 'Barrel jack centre (+): 7–12 V in, through the shield\'s 5 V regulator', 'DC-': 'Barrel jack outer (−): ground', '3V3.2': '3.3 V from the board (power header)', '5V.2': '5 V (power header)' },
   },
   'wokwi-arduino-uno': {
     about: 'The classic beginner board. It runs your sketch and works at 5 V. Pins marked ~ (3, 5, 6, 9, 10, 11) can dim LEDs and set motor speed with analogWrite.',
@@ -9395,6 +9616,16 @@ function pinInfo(type, pin) {
     if (/^(TX|RX)/.test(pin)) return 'Serial port pin; avoid for other uses';
     if (/^D\d+/.test(pin)) return 'Input/output pin, PWM capable (3.3 V)';
   }
+  if (type === 'bench-esp32-38' || type === 'bench-esp32-shield') {
+    const row = /^([VG])\.(.+)$/.exec(pin);
+    if (row) return row[1] === 'G' ? `Ground pin (G) of the ${row[2]} row` : `Power pin (V) of the ${row[2]} row: 5 V, or 3.3 V with the jumper set to 3V3`;
+    if (pin === '5V') return '5 V: from USB-C (or the shield\'s jack); 5 V in here powers the board';
+    if (/^(SD\d|CMD|CLK)$/.test(pin)) return 'Wired to the flash memory inside the module: do not use';
+    if (pin === '0') return 'GPIO0, the BOOT button: held LOW at power-up it enters download mode, so avoid it for buttons';
+    const old = /^\d+$/.test(pin) ? `D${pin}` : { TX: 'TX0', RX: 'RX0' }[pin] || pin;
+    const d = pinInfo('wokwi-esp32-devkit-v1', old);
+    return /^\d+$/.test(pin) ? `GPIO${pin}: ${d.replace(/^Input/, 'input').replace(/D(\d+)/g, '$1')}` : d;
+  }
   if (type === 'wokwi-arduino-uno') {
     if (pin === '5V') return '5 V output (from USB or the regulator)';
     if (pin === '3.3V') return '3.3 V output, max ~50 mA';
@@ -9431,7 +9662,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
 };
 // Board the examples open on (ESP32 by default); remembered in this browser.
-let exBoard = store.get('circuit-bench-board') === 'uno' ? 'uno' : 'esp32';
+let exBoard = BOARD_NAMES[store.get('circuit-bench-board')] ? store.get('circuit-bench-board') : 'esp32';
 let exLayout = store.get('circuit-bench-layout') === 'wires' ? 'wires' : 'bb';
 const boardPickHtml = (cur, act) => `<span class="seg" role="group" aria-label="Board">${Object.entries(BOARD_NAMES).map(([b, n]) => `<button data-act="${act}" data-board="${b}" class="${b === cur ? 'on' : ''}" aria-pressed="${b === cur}">${n}</button>`).join('')}</span>`;
 const exLabel = (ex) => exampleBoards(ex).length > 1 ? `${ex.name} (${BOARD_NAMES[exampleBoards(ex).includes(exBoard) ? exBoard : exampleBoards(ex)[0]]})` : ex.name;
@@ -9483,7 +9714,7 @@ const wiresSvg = $('wires');
 const WIRE_COLORS = { green: '#2da44e', red: '#d1242f', black: 'var(--wblack)', blue: '#1f6feb', orange: '#e16f24', purple: '#8250df', yellow: '#d4a72c', white: '#c9d1d9', gray: '#8c959f' };
 const wireColor = (c) => WIRE_COLORS[c] || c || WIRE_COLORS.green;
 const PREFIX = {
-  'wokwi-esp32-devkit-v1': 'esp', 'wokwi-arduino-uno': 'uno', 'wokwi-resistor': 'r', 'wokwi-led': 'led', 'wokwi-rgb-led': 'rgb', 'wokwi-7segment': 'seg',
+  'wokwi-esp32-devkit-v1': 'esp', 'bench-esp32-38': 'esp', 'bench-esp32-shield': 'esp', 'wokwi-arduino-uno': 'uno', 'wokwi-resistor': 'r', 'wokwi-led': 'led', 'wokwi-rgb-led': 'rgb', 'wokwi-7segment': 'seg',
   'wokwi-buzzer': 'bz', 'wokwi-servo': 'servo', 'wokwi-potentiometer': 'pot', 'wokwi-pushbutton': 'btn', 'wokwi-slide-switch': 'sw', 'wokwi-hc-sr04': 'us',
   'wokwi-pir-motion-sensor': 'pir', 'wokwi-photoresistor-sensor': 'ldr', 'wokwi-ntc-temperature-sensor': 'ntc', 'wokwi-ssd1306': 'oled', 'wokwi-lcd1602': 'lcd',
   'bench-switch': 'sw', 'bench-lm2596': 'buck', 'bench-ams1117': 'ldo', 'bench-capacitor': 'c', 'bench-dc-motor': 'm', 'bench-diode': 'd', 'bench-nmos': 'q',
@@ -9599,7 +9830,7 @@ function resolvePlugs() {
     const v = views.get(p?.id);
     const xy = pinXY(w.a.part, w.a.pin);
     const to = pinXY(w.b.part, w.b.pin);
-    if (!v || !xy || !to || p.rot || to[0] < p.x + v.w || xy[0] > p.x + 16) continue;
+    if (!v || !xy || !to || p.rot || to[0] < p.x + v.w || xy[0] > p.x + (LIB[p.type].leftPinsX ?? 16)) continue;
     const top = to[1] < p.y + v.h / 2;
     const k = lanes.get(`${p.id}|${top}`) || 0;
     lanes.set(`${p.id}|${top}`, k + 1);
@@ -10790,7 +11021,7 @@ function setExLayout(layout) {
 }
 
 function setExBoard(board) {
-  exBoard = board === 'uno' ? 'uno' : 'esp32';
+  exBoard = BOARD_NAMES[board] ? board : 'esp32';
   store.set('circuit-bench-board', exBoard);
   renderExMenu();
 }
@@ -11368,7 +11599,7 @@ function flashOriginal() {
 // A virtual phone joins the ESP32's Wi-Fi hotspot and opens the page the
 // sketch serves (http://192.168.4.1). The page runs in a sandboxed frame;
 // its fetch() calls are passed to the simulated board's web server.
-const wifiBoards = () => (doc?.parts || []).filter((p) => p.type === 'wokwi-esp32-devkit-v1');
+const wifiBoards = () => (doc?.parts || []).filter((p) => LIB[p.type]?.mcu && boardKind(p) === 'esp32');
 const phone = { el: null, board: null, loadedFor: null, loading: false, wifi: true, waitSince: 0, pending: new Map() };
 const PHONE_SHIM = `<script>(()=>{let n=0;const w=new Map();
 addEventListener('message',(e)=>{const d=e.data;if(!d||d.benchRes===undefined)return;const r=w.get(d.benchRes);if(!r)return;w.delete(d.benchRes);
@@ -11946,15 +12177,17 @@ function exportWokwi() {
   const parts = [];
   let skipped = 0;
   for (const p of doc.parts) {
-    if (!p.type.startsWith('wokwi-')) { skipped++; continue; }
     const def = LIB[p.type];
+    if (!p.type.startsWith('wokwi-') && !def.wokwi) { skipped++; continue; }
     const props = propsOf(p);
     const attrs = { ...(def.attrs?.(props) || {}) };
     if (p.type === 'wokwi-resistor') attrs.value = String(props.value);
-    parts.push({ type: p.type, id: p.id, top: p.y, left: p.x, ...(p.rot ? { rotate: p.rot } : {}), attrs });
+    parts.push({ type: def.wokwi?.type || p.type, id: p.id, top: p.y, left: p.x, ...(p.rot ? { rotate: p.rot } : {}), attrs });
   }
   const ok = new Set(parts.map((p) => p.id));
-  const connections = [...doc.wires, ...plugs()].filter((w) => ok.has(w.a.part) && ok.has(w.b.part)).map((w) => [`${w.a.part}:${w.a.pin}`, `${w.b.part}:${w.b.pin}`, w.color || 'green', []]);
+  // Parts drawn here but not in Wokwi (the 38-pin ESP32, its shield) export as the nearest Wokwi board.
+  const wpin = (e) => { const q = partOf(e.part); const f = q && LIB[q.type].wokwi?.pin; return f ? f(e.pin, propsOf(q)) : e.pin; };
+  const connections = [...doc.wires, ...plugs()].filter((w) => ok.has(w.a.part) && ok.has(w.b.part) && wpin(w.a) && wpin(w.b)).map((w) => [`${w.a.part}:${wpin(w.a)}`, `${w.b.part}:${wpin(w.b)}`, w.color || 'green', []]);
   const out = { version: 1, author: 'Circuit Bench', editor: 'wokwi', parts, connections, dependencies: {} };
   textDialog('Wokwi diagram.json', JSON.stringify(out, null, 2), 'diagram.json',
     `Paste this into diagram.json of a Wokwi project.${skipped ? ` ${skipped} part(s) Wokwi does not have (batteries, drivers, motors…) were left out.` : ''}`);
