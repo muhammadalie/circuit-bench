@@ -54,6 +54,16 @@ header .grow { flex: 1; }
 #simclock { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; min-width: 120px; }
 .main { display: grid; grid-template-columns: 210px minmax(0, 1fr) 330px; min-height: 0; }
 .panel { background: var(--panel); min-height: 0; overflow: auto; }
+/* Hide the parts list and/or the right panel to give the canvas the room. */
+.app.no-left #shelfPanel, .app.no-right #sidePanel { display: none; }
+.app.no-left .main { grid-template-columns: minmax(0, 1fr) 330px; }
+.app.no-right .main { grid-template-columns: 210px minmax(0, 1fr); }
+.app.no-left.no-right .main { grid-template-columns: minmax(0, 1fr); }
+.edge { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; width: 20px; height: 64px; padding: 0; background: var(--panel); border: 1px solid var(--line); color: var(--muted); font-size: 14px; line-height: 1; box-shadow: 0 1px 6px #0002; }
+.edge:hover { color: var(--ink); background: var(--soft); }
+#edgeL { left: 0; border-left: none; border-radius: 0 8px 8px 0; }
+#edgeR { right: 0; border-right: none; border-radius: 8px 0 0 8px; }
+#zFull.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 #shelfPanel { border-right: 1px solid var(--line); padding: 8px; }
 #sidePanel { border-left: 1px solid var(--line); display: flex; flex-direction: column; }
 .shelf input { width: 100%; margin-bottom: 6px; }
@@ -220,6 +230,9 @@ table.projects { width: 100%; } table.projects td { padding: 6px 4px; border-bot
   #shelfPanel { display: none; }
   #sidePanel { border-left: none; border-top: 1px solid var(--line); min-height: 50vh; }
   .tabbody { overflow: visible; }
+  #edgeL { display: none; }
+  .app.no-right { height: 100dvh; }
+  .app.no-right .main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   #simclock { min-width: 0; }
   header .brand span { display: none; }
   .hint { display: none; }
@@ -281,7 +294,9 @@ table.projects { width: 100%; } table.projects td { padding: 6px 4px; border-bot
       <div id="selbar" hidden></div>
       <div id="guidebar" hidden></div>
       <div id="legend" hidden></div>
-      <div class="zoom"><button id="zOut" aria-label="Zoom out">−</button><button id="zFit" aria-label="Fit">⤢</button><button id="zIn" aria-label="Zoom in">+</button></div>
+      <button class="edge" id="edgeL" title="Hide the parts list ( [ )" aria-label="Hide the parts list">‹</button>
+      <button class="edge" id="edgeR" title="Hide the side panel ( ] )" aria-label="Hide the side panel">›</button>
+      <div class="zoom"><button id="zFull" title="Full screen: hide both panels (F). Press F or Esc to come back." aria-label="Full screen canvas" aria-pressed="false">⛶</button><button id="zOut" aria-label="Zoom out">−</button><button id="zFit" aria-label="Fit">⤢</button><button id="zIn" aria-label="Zoom in">+</button></div>
       <div class="toast" id="toast" hidden></div>
     </section>
     <aside class="panel" id="sidePanel">
@@ -10857,7 +10872,7 @@ let pan = null;
 let pinch = null;
 
 stage.addEventListener('pointerdown', (e) => {
-  if (e.target.closest?.('.zoom')) return;
+  if (e.target.closest?.('.zoom, .edge')) return;
   pointers.set(e.pointerId, [e.clientX, e.clientY]);
   closeMenus();
   if (pointers.size === 2) {
@@ -11093,9 +11108,65 @@ function showTip(e) {
   tip.style.top = `${e.clientY + 14}px`;
 }
 
+// ---------- panels: hide the parts list / side panel, full screen ----------
+const appEl = document.querySelector('.app');
+const panels = { left: true, right: true, before: null };
+try { Object.assign(panels, JSON.parse(store.get('circuit-bench-panels') || '{}'), { before: null }); } catch { /* keep defaults */ }
+function setPanels(left, right, keep = true) {
+  const r0 = stage.getBoundingClientRect();
+  panels.left = left;
+  panels.right = right;
+  appEl.classList.toggle('no-left', !left);
+  appEl.classList.toggle('no-right', !right);
+  $('edgeL').textContent = left ? '‹' : '›';
+  $('edgeL').title = left ? 'Hide the parts list ( [ )' : 'Show the parts list ( [ )';
+  $('edgeL').setAttribute('aria-label', left ? 'Hide the parts list' : 'Show the parts list');
+  $('edgeR').textContent = right ? '›' : '‹';
+  $('edgeR').title = right ? 'Hide the side panel ( ] )' : 'Show the side panel ( ] )';
+  $('edgeR').setAttribute('aria-label', right ? 'Hide the side panel' : 'Show the side panel');
+  const full = !left && !right;
+  $('zFull').classList.toggle('on', full);
+  $('zFull').setAttribute('aria-pressed', String(full));
+  $('zFull').textContent = full ? '⤡' : '⛶';
+  $('zFull').title = full ? 'Show the panels again (F or Esc)' : 'Full screen: hide both panels (F). Press F or Esc to come back.';
+  if (keep) store.set('circuit-bench-panels', JSON.stringify({ left, right }));
+  // Keep the circuit centred in the canvas as it grows or shrinks.
+  const r1 = stage.getBoundingClientRect();
+  if (r0.width && r1.width) { view.x += (r1.width - r0.width) / 2; view.y += (r1.height - r0.height) / 2; applyView(); }
+  if (doc) renderWires();
+}
+const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+function toggleFocus() {
+  if (panels.before) {
+    const b = panels.before;
+    panels.before = null;
+    if (isFull()) (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)?.catch?.(() => {});
+    setPanels(b.left, b.right);
+    return;
+  }
+  panels.before = { left: panels.left, right: panels.right };
+  setPanels(false, false, false);
+  const req = document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen;
+  try { req?.call(document.documentElement)?.catch?.(() => {}); } catch { /* full screen not allowed: panels are hidden anyway */ }
+  toast('Full screen canvas. Press F or Esc, or ⤡, to bring the panels back.');
+}
+// Leaving browser full screen (Esc) brings the panels back too.
+for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => { if (!isFull() && panels.before) toggleFocus(); });
+function showSidePanel() { if (!panels.right) { if (panels.before) panels.before.right = true; setPanels(panels.left, true, !panels.before); } }
+$('edgeL').onclick = () => { panels.before = null; setPanels(!panels.left, panels.right); };
+$('edgeR').onclick = () => { panels.before = null; setPanels(panels.left, !panels.right); };
+$('zFull').onclick = toggleFocus;
+setPanels(panels.left !== false, panels.right !== false, false);
+
 document.addEventListener('keydown', (e) => {
   if (e.target.closest?.('input, select, textarea')) return;
   const k = e.key.toLowerCase();
+  if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.key === '[') { panels.before = null; setPanels(!panels.left, panels.right); return; }
+    if (e.key === ']') { panels.before = null; setPanels(panels.left, !panels.right); return; }
+    if (k === 'f') { e.preventDefault(); toggleFocus(); return; }
+  }
+  if (e.key === 'Escape' && panels.before && !isFull()) { toggleFocus(); return; }
   if ((e.ctrlKey || e.metaKey) && ((k === 'z' && e.shiftKey) || k === 'y')) { e.preventDefault(); redo(); return; }
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undo(); return; }
   if (e.key === ' ' && !e.target.closest?.('button')) { e.preventDefault(); if (running) pauseRun(); else startRun(); return; }
@@ -12600,7 +12671,7 @@ for (const id of ['selbar', 'guidebar']) {
     if (act === 'rotate') rotate(sel.id);
     else if (act === 'duplicate') pastePart(partOf(sel.id));
     else if (act === 'delete') removeSelected();
-    else if (act === 'details') { tab = 'inspect'; sideView = null; renderSide(); if (narrow.matches) $('sidePanel').scrollIntoView({ behavior: 'smooth' }); }
+    else if (act === 'details') { showSidePanel(); tab = 'inspect'; sideView = null; renderSide(); if (narrow.matches) $('sidePanel').scrollIntoView({ behavior: 'smooth' }); }
     else if (act === 'straighten') { pushHistory(); doc.wires[sel.i].pts = []; save(); renderWires(); }
     else if (act === 'draft-cancel') cancelDraft();
     else if (act === 'draft-back') { draft.pts.pop(); renderWires(); }
@@ -12839,7 +12910,7 @@ $('fileMenu').onclick = (e) => {
   if (act === 'undo') undo();
   if (act === 'help') { select(null); tab = 'guide'; renderSide(); }
   if (act === 'keys') {
-    sideView = () => `<h3>Keyboard shortcuts</h3><table>${[['Space', 'Run / pause'], ['Ctrl+Z', 'Undo'], ['Ctrl+Y or Ctrl+Shift+Z', 'Redo'], ['R', 'Rotate the selected part'], ['Ctrl+C / Ctrl+V', 'Copy and paste the selected part'], ['Ctrl+D', 'Duplicate the selected part'], ['Ctrl+S (in Code)', 'Compile and flash'], ['Delete / Backspace', 'Delete the selected part or wire'], ['Esc', 'Cancel the wire you are drawing, or clear the selection'], ['Double-click a wire', 'Add a bend'], ['Double-click a bend', 'Remove it'], ['Mouse wheel / pinch', 'Zoom']].map(([k, v]) => `<tr><th style="white-space:nowrap">${k}</th><td>${v}</td></tr>`).join('')}</table><div class="row" style="margin-top:8px"><button data-act="close-dlg">Close</button></div>`;
+    sideView = () => `<h3>Keyboard shortcuts</h3><table>${[['Space', 'Run / pause'], ['Ctrl+Z', 'Undo'], ['Ctrl+Y or Ctrl+Shift+Z', 'Redo'], ['R', 'Rotate the selected part'], ['Ctrl+C / Ctrl+V', 'Copy and paste the selected part'], ['Ctrl+D', 'Duplicate the selected part'], ['Ctrl+S (in Code)', 'Compile and flash'], ['Delete / Backspace', 'Delete the selected part or wire'], ['Esc', 'Cancel the wire you are drawing, or clear the selection'], ['Double-click a wire', 'Add a bend'], ['Double-click a bend', 'Remove it'], ['Mouse wheel / pinch', 'Zoom'], ['[ and ]', 'Hide or show the parts list / the side panel'], ['F', 'Full screen canvas (F or Esc to come back)']].map(([k, v]) => `<tr><th style="white-space:nowrap">${k}</th><td>${v}</td></tr>`).join('')}</table><div class="row" style="margin-top:8px"><button data-act="close-dlg">Close</button></div>`;
     tab = 'inspect';
     renderSide();
   }
