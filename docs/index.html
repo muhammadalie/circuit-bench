@@ -135,7 +135,8 @@ a { color: var(--accent); }
 .seg button, .menu > div .seg button { display: inline-block; width: auto; border: none; border-radius: 0; background: var(--soft); padding: 4px 10px; }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.on, .menu > div .seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
-#exMenu { left: auto; right: 0; max-width: calc(100vw - 16px); }
+#exMenu, #fileMenu { left: auto; right: 0; max-width: calc(100vw - 16px); }
+.menu > div { max-height: calc(100vh - 70px); overflow-y: auto; }
 .menu > div .exboard { display: flex; align-items: center; gap: 8px; padding: 4px 10px; }
 .menu > div hr { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
 .kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
@@ -254,6 +255,7 @@ table.projects { width: 100%; } table.projects td { padding: 6px 4px; border-bot
       <option value="flat">Wires: simple</option>
     </select>
     <span class="grow"></span>
+    <button id="newBtn" title="Start an empty bench (your current circuit stays in File → My projects, and Undo brings it back)">＋ New</button>
     <div class="menu"><button id="exBtn">Examples ▾</button><div id="exMenu" hidden></div></div>
     <div class="menu"><button id="fileBtn">File ▾</button><div id="fileMenu" hidden>
       <button data-act="projects">My projects…</button>
@@ -11960,8 +11962,17 @@ function exportWokwi() {
 
 // ---------- menus ----------
 function closeMenus() { $('exMenu').hidden = true; $('fileMenu').hidden = true; }
-$('exBtn').onclick = (e) => { e.stopPropagation(); const m = $('exMenu'); const open = m.hidden; closeMenus(); m.hidden = !open; };
-$('fileBtn').onclick = (e) => { e.stopPropagation(); const m = $('fileMenu'); const open = m.hidden; closeMenus(); m.hidden = !open; };
+// Open a dropdown lined up with its button's right edge, but always inside the window.
+function openMenu(m) {
+  m.hidden = false;
+  m.style.right = 'auto';
+  const box = m.parentElement.getBoundingClientRect();
+  const w = Math.min(m.offsetWidth, innerWidth - 16);
+  const left = Math.max(8, Math.min(box.right - w, innerWidth - w - 8));
+  m.style.left = `${left - box.left}px`;
+}
+$('exBtn').onclick = (e) => { e.stopPropagation(); const m = $('exMenu'); const open = m.hidden; closeMenus(); if (open) openMenu(m); };
+$('fileBtn').onclick = (e) => { e.stopPropagation(); const m = $('fileMenu'); const open = m.hidden; closeMenus(); if (open) openMenu(m); };
 document.addEventListener('click', (e) => { if (!e.target.closest('.menu')) closeMenus(); });
 function renderExMenu() {
   $('exMenu').innerHTML = `<div class="exboard"><span>Board:</span>${boardPickHtml(exBoard, 'menu-board')}</div><div class="exboard"><span>Build:</span>${layoutPickHtml(exLayout, 'menu-layout')}</div><hr>`
@@ -12001,7 +12012,7 @@ $('fileMenu').onclick = (e) => {
   closeMenus();
   const act = b.dataset.act;
   if (act === 'projects') { sideView = projectsHtml; renderSide(); if (narrow.matches) $('sidePanel').scrollIntoView({ behavior: 'smooth' }); }
-  if (act === 'new') loadDoc({ name: 'New circuit', parts: [], wires: [] }, 'Empty board. Pick parts from the list.');
+  if (act === 'new') newCircuit();
   if (act === 'open') pasteDialog('Open a project', 'project', 'A .json file saved from Circuit Bench.');
   if (act === 'save') textDialog('Project file', JSON.stringify(doc, null, 1), `${slug()}.json`, 'Download it, or copy it to keep it somewhere else. Open it again with File → Open.');
   if (act === 'wokwi-in') pasteDialog('Import from Wokwi', 'wokwi', 'Open your Wokwi project, copy the contents of diagram.json, and paste it here.');
@@ -12017,6 +12028,13 @@ $('fileMenu').onclick = (e) => {
 $('projName').addEventListener('change', (e) => { doc.name = e.target.value; save(); });
 $('runBtn').onclick = () => (running ? pauseRun() : startRun());
 $('stopBtn').onclick = stopSim;
+// Start an empty bench. An edited circuit is already kept in My projects, and Undo brings it back.
+function newCircuit() {
+  const had = doc.parts.length;
+  if (doc.touched && had) save();
+  loadDoc({ name: 'New circuit', parts: [], wires: [] }, had ? 'Empty bench. Undo brings the last circuit back' + (doc.touched ? '; it is also in File → My projects.' : '.') : 'Empty bench. Pick parts from the list.');
+}
+$('newBtn').onclick = newCircuit;
 $('undoBtn').onclick = undo;
 $('redoBtn').onclick = redo;
 $('flowSel').onchange = () => { flowOffset.length = 0; renderWires(); updateRunBtn(); };
