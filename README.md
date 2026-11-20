@@ -4,6 +4,8 @@ Build and test electronics circuits virtually before you buy parts: drag parts, 
 
 **Open it:** https://muhammadalie.github.io/circuit-bench/
 
+Every example can run on an **ESP32** (the default) or an **Arduino Uno**: pick the board at the top of Examples ▾, or switch it in the Guide tab. The parts and wires move to the pins the sketch uses on that board (for example the traffic light uses D25/D26/D27 on the ESP32 and 12/11/10 on the Uno).
+
 On a phone, open the link and choose "Add to Home Screen" (iPhone: Share → Add to Home Screen; Android: menu → Install app). It then opens full-screen like an app and works offline. The first Compile & Flash downloads the C++ compiler (about 100 MB) once.
 
 ## What is here
