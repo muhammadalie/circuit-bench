@@ -1,6 +1,6 @@
 // Offline support: keep the app page and icons; the compiler (jsDelivr) is
 // cached by the browser's normal HTTP cache.
-const CACHE = 'circuit-bench-98d6c5745b';
+const CACHE = 'circuit-bench-ecff16538a';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {
